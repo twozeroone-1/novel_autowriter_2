@@ -52,6 +52,28 @@ def build_detail_rows(records: list[dict]) -> list[dict]:
     return rows
 
 
+def format_automation_context_update(context_update: dict) -> str:
+    if not isinstance(context_update, dict):
+        return "-"
+
+    legacy = context_update.get("legacy", {}) if isinstance(context_update.get("legacy"), dict) else {}
+    canon_candidate = (
+        context_update.get("canon_candidate", {}) if isinstance(context_update.get("canon_candidate"), dict) else {}
+    )
+    parts: list[str] = []
+    legacy_status = str(legacy.get("status", "")).strip()
+    canon_status = str(canon_candidate.get("status", "")).strip()
+    if legacy_status:
+        parts.append(f"legacy: {legacy_status}")
+    if canon_status:
+        parts.append(f"canon: {canon_status}")
+    if parts:
+        return " / ".join(parts)
+
+    fallback = str(context_update.get("status", "")).strip()
+    return fallback or "-"
+
+
 def build_automation_history_rows(records: list[dict]) -> list[dict]:
     rows: list[dict] = []
     for record in records:
@@ -61,7 +83,7 @@ def build_automation_history_rows(records: list[dict]) -> list[dict]:
                 "timestamp": record.get("timestamp", ""),
                 "title": record.get("title", ""),
                 "result": "success" if record.get("success") else "failed",
-                "context_update": context_update.get("status", "-"),
+                "context_update": format_automation_context_update(context_update),
                 "detail": record.get("saved_path", "") if record.get("success") else record.get("error_text", ""),
             }
         )

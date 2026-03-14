@@ -1,11 +1,34 @@
+import importlib
+import importlib.util
+import sys
+import types
 import unittest
 from unittest.mock import patch
 
-from ui import diagnostics as diagnostics_ui
+
+def _install_fake_streamlit():
+    fake_streamlit = types.SimpleNamespace(
+        text_area=lambda *args, **kwargs: None,
+        warning=lambda *args, **kwargs: None,
+        caption=lambda *args, **kwargs: None,
+        selectbox=lambda *args, **kwargs: "all",
+        expander=lambda *args, **kwargs: None,
+        divider=lambda *args, **kwargs: None,
+        dataframe=lambda *args, **kwargs: None,
+    )
+    sys.modules["streamlit"] = fake_streamlit
 
 
 class TestDiagnosticsUi(unittest.TestCase):
+    def _load_module(self):
+        spec = importlib.util.find_spec("ui.diagnostics")
+        self.assertIsNotNone(spec, "ui.diagnostics should exist")
+        _install_fake_streamlit()
+        sys.modules.pop("ui.diagnostics", None)
+        return importlib.import_module("ui.diagnostics")
+
     def test_format_sidebar_summary_uses_korean_compact_metadata(self):
+        diagnostics_ui = self._load_module()
         summary = diagnostics_ui.format_sidebar_summary(
             {"run_count": 3, "failure_count": 1, "latest_backend": "cli"}
         )
@@ -16,6 +39,7 @@ class TestDiagnosticsUi(unittest.TestCase):
         self.assertIn("cli", summary)
 
     def test_filter_runs_by_success_backend_and_model(self):
+        diagnostics_ui = self._load_module()
         runs = [
             {
                 "success": False,
@@ -42,6 +66,7 @@ class TestDiagnosticsUi(unittest.TestCase):
         self.assertEqual(len(filtered), 1)
 
     def test_build_detail_rows_preserves_newest_first_metadata(self):
+        diagnostics_ui = self._load_module()
         rows = diagnostics_ui.build_detail_rows(
             [
                 {
@@ -66,12 +91,14 @@ class TestDiagnosticsUi(unittest.TestCase):
         self.assertEqual(rows[0]["error_text"], "api failed")
 
     def test_get_diagnostics_warning_text_is_korean(self):
+        diagnostics_ui = self._load_module()
         warning_text = diagnostics_ui.get_diagnostics_warning_text()
 
         self.assertIn("민감", warning_text)
         self.assertIn("프롬프트", warning_text)
 
     def test_render_detail_fields_uses_read_only_text_areas(self):
+        diagnostics_ui = self._load_module()
         row = {
             "prompt_text": "prompt",
             "response_text": "response",
@@ -90,6 +117,7 @@ class TestDiagnosticsUi(unittest.TestCase):
 
 
     def test_build_automation_history_rows_formats_execution_metadata(self):
+        diagnostics_ui = self._load_module()
         rows = diagnostics_ui.build_automation_history_rows(
             [
                 {
@@ -97,14 +125,20 @@ class TestDiagnosticsUi(unittest.TestCase):
                     "title": "8화",
                     "success": True,
                     "saved_path": "C:/novel/8화.md",
-                    "context_update": {"status": "applied"},
+                    "context_update": {
+                        "legacy": {"status": "skipped"},
+                        "canon_candidate": {"status": "recorded"},
+                    },
                 },
                 {
                     "timestamp": "2026-03-12T06:42:28.396475+09:00",
                     "title": "7화",
                     "success": False,
                     "error_text": "boom",
-                    "context_update": {"status": "partial_failure"},
+                    "context_update": {
+                        "legacy": {"status": "partial_failure"},
+                        "canon_candidate": {"status": "missing"},
+                    },
                 },
             ]
         )
@@ -112,9 +146,10 @@ class TestDiagnosticsUi(unittest.TestCase):
         self.assertEqual(rows[0]["timestamp"], "2026-03-12T09:18:10.284288+09:00")
         self.assertEqual(rows[0]["title"], "8화")
         self.assertEqual(rows[0]["result"], "success")
-        self.assertEqual(rows[0]["context_update"], "applied")
+        self.assertEqual(rows[0]["context_update"], "legacy: skipped / canon: recorded")
         self.assertEqual(rows[0]["detail"], "C:/novel/8화.md")
         self.assertEqual(rows[1]["result"], "failed")
+        self.assertEqual(rows[1]["context_update"], "legacy: partial_failure / canon: missing")
         self.assertEqual(rows[1]["detail"], "boom")
 
 

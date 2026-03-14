@@ -1,13 +1,62 @@
 import importlib
 import importlib.util
+import sys
+import types
 import unittest
+
+
+def _install_fake_streamlit():
+    fake_streamlit = types.SimpleNamespace(
+        text_area=lambda *args, **kwargs: None,
+        checkbox=lambda *args, **kwargs: False,
+        selectbox=lambda *args, **kwargs: None,
+        number_input=lambda *args, **kwargs: 0,
+        time_input=lambda *args, **kwargs: None,
+        multiselect=lambda *args, **kwargs: [],
+        button=lambda *args, **kwargs: False,
+        form=lambda *args, **kwargs: None,
+        form_submit_button=lambda *args, **kwargs: False,
+        columns=lambda *args, **kwargs: [],
+        metric=lambda *args, **kwargs: None,
+        divider=lambda *args, **kwargs: None,
+        subheader=lambda *args, **kwargs: None,
+        header=lambda *args, **kwargs: None,
+        caption=lambda *args, **kwargs: None,
+        info=lambda *args, **kwargs: None,
+        warning=lambda *args, **kwargs: None,
+        success=lambda *args, **kwargs: None,
+        dataframe=lambda *args, **kwargs: None,
+        write=lambda *args, **kwargs: None,
+        rerun=lambda *args, **kwargs: None,
+        session_state={},
+    )
+    sys.modules["streamlit"] = fake_streamlit
 
 
 class TestAutomationUi(unittest.TestCase):
     def _load_module(self):
         spec = importlib.util.find_spec("ui.automation")
         self.assertIsNotNone(spec, "ui.automation should exist")
+        _install_fake_streamlit()
+        sys.modules.pop("ui.automation", None)
         return importlib.import_module("ui.automation")
+
+    def test_get_context_update_defaults_disable_legacy_auto_updates_when_missing(self):
+        module = self._load_module()
+
+        defaults = module.get_context_update_defaults({})
+
+        self.assertFalse(defaults["state"])
+        self.assertFalse(defaults["summary"])
+
+    def test_format_context_update_policy_mentions_canon_recording_when_legacy_is_disabled(self):
+        module = self._load_module()
+
+        text = module.format_context_update_policy({"state": False, "summary": False})
+
+        self.assertIn("레거시", text)
+        self.assertIn("Canon", text)
+        self.assertIn("자동 반영", text)
 
     def test_format_schedule_summary_for_weekly_rule(self):
         module = self._load_module()
