@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -276,6 +277,19 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(workspace_settings["state"], "legacy state")
                 self.assertEqual(workspace_settings["summary_of_previous"], "legacy summary")
 
+    def test_get_config_does_not_expose_plot_fields(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                plot_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ):
+                manager = ContextManager(project_name="sample")
+                manager.save_plot_outline("stored plot")
+
+                config = manager.get_config()
+
+                self.assertNotIn("plot_outline", config)
+                self.assertNotIn("plot_version", config)
+
     def test_save_story_bible_sections_updates_story_bible_store_and_legacy_config(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
@@ -342,12 +356,16 @@ class TestContextManager(unittest.TestCase):
                 plot_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
             ):
                 manager = ContextManager(project_name="sample")
-                manager.save_config(
-                    {
-                        **context_module.DEFAULT_CONFIG,
-                        "plot_outline": "legacy plot",
-                        "plot_version": "2",
-                    }
+                manager.config_path.write_text(
+                    json.dumps(
+                        {
+                            **context_module.DEFAULT_CONFIG,
+                            "plot_outline": "legacy plot",
+                            "plot_version": "2",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
                 )
                 PlotStore(project_name="sample").save(
                     {
@@ -360,23 +378,55 @@ class TestContextManager(unittest.TestCase):
 
                 self.assertEqual(plot_outline, "stored plot")
 
-    def test_get_plot_outline_falls_back_to_legacy_config_when_plot_store_missing(self):
+    def test_get_plot_outline_falls_back_to_raw_legacy_plot_fields_when_plot_store_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
                 plot_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
             ):
                 manager = ContextManager(project_name="sample")
-                manager.save_config(
-                    {
-                        **context_module.DEFAULT_CONFIG,
-                        "plot_outline": "legacy plot",
-                        "plot_version": "2",
-                    }
+                manager.config_path.write_text(
+                    json.dumps(
+                        {
+                            **context_module.DEFAULT_CONFIG,
+                            "plot_outline": "legacy plot",
+                            "plot_version": "2",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
                 )
 
                 plot_outline = manager.get_plot_outline()
 
                 self.assertEqual(plot_outline, "legacy plot")
+
+    def test_save_config_ignores_plot_fields_and_keeps_existing_plot_store_value(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                plot_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ), patch.object(story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)):
+                manager = ContextManager(project_name="sample")
+                manager.save_plot_outline("stored plot")
+
+                manager.save_config(
+                    {
+                        **context_module.DEFAULT_CONFIG,
+                        "worldview": "new world",
+                        "tone_and_manner": "new style",
+                        "continuity": "new rules",
+                        "plot_outline": "ignored plot",
+                        "plot_version": "99",
+                    }
+                )
+
+                config = manager.get_config()
+                plot_payload = PlotStore(project_name="sample").load()
+
+                self.assertEqual(config["worldview"], "new world")
+                self.assertNotIn("plot_outline", config)
+                self.assertNotIn("plot_version", config)
+                self.assertEqual(plot_payload["plot_outline"], "stored plot")
+                self.assertEqual(plot_payload["plot_version"], "1")
 
     def test_save_plot_outline_updates_plot_store_and_legacy_shadow_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -384,19 +434,23 @@ class TestContextManager(unittest.TestCase):
                 plot_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
             ):
                 manager = ContextManager(project_name="sample")
-                manager.save_config(
-                    {
-                        **context_module.DEFAULT_CONFIG,
-                        "plot_outline": "legacy plot",
-                        "plot_version": "2",
-                    }
+                manager.config_path.write_text(
+                    json.dumps(
+                        {
+                            **context_module.DEFAULT_CONFIG,
+                            "plot_outline": "legacy plot",
+                            "plot_version": "2",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
                 )
 
                 with patch.object(manager, "save_config", side_effect=AssertionError("save_config should not be used")):
                     manager.save_plot_outline("new stored plot")
 
                 plot_payload = PlotStore(project_name="sample").load()
-                legacy_config = manager._load_normalized_config()
+                legacy_config = json.loads(manager.config_path.read_text(encoding="utf-8"))
                 self.assertEqual(
                     plot_payload,
                     {
@@ -447,9 +501,9 @@ class TestContextManager(unittest.TestCase):
                         "continuity": "fixed rules",
                         "state": "current state",
                         "summary_of_previous": "previous summary",
-                        "plot_outline": "plot outline text",
                     }
                 )
+                manager.save_plot_outline("plot outline text")
                 CanonStore(project_name="sample").save_current_state(
                     {
                         "people": {"Hero": {"mood": "alert"}},
@@ -502,12 +556,7 @@ class TestContextManager(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)):
                 manager = ContextManager(project_name="sample")
-                manager.save_config(
-                    {
-                        **context_module.DEFAULT_CONFIG,
-                        "plot_outline": "plot outline text",
-                    }
-                )
+                manager.save_plot_outline("plot outline text")
 
                 prompt = manager.build_generation_prompt(
                     "write next chapter",

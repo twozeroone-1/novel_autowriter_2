@@ -4,7 +4,7 @@ from pathlib import Path
 from core.app_paths import DATA_PROJECTS_DIR
 from core.canon_store import CanonStore
 from core.file_utils import atomic_write_json
-from core.plot_store import PlotStore
+from core.plot_store import DEFAULT_PLOT, PlotStore
 from core.release_policy_store import ReleasePolicyStore
 from core.story_bible_store import DEFAULT_STORY_BIBLE, StoryBibleStore
 
@@ -16,8 +16,6 @@ DEFAULT_CONFIG = {
     "continuity": "여기에 절대 변경 불가 룰, 연표, 관계도(CONTINUITY)를 작성하세요.",
     "state": "여기에 현재 회차 떡밥, 갈등 상황, 감정선(STATE)을 작성하세요.",
     "summary_of_previous": "여기에 지난 줄거리 요약이 누적됩니다.",
-    "plot_outline": "",
-    "plot_version": "0",
 }
 
 
@@ -83,6 +81,12 @@ class ContextManager:
     def _load_normalized_config(self) -> dict:
         return self._normalize_config(self._load_json(self.config_path))
 
+    def _load_raw_config_payload(self) -> dict:
+        payload = self._load_json(self.config_path)
+        if isinstance(payload, dict):
+            return payload.copy()
+        return {}
+
     def _merge_story_bible_into_config(self, config: dict) -> dict:
         merged = DEFAULT_CONFIG.copy()
         merged.update(config)
@@ -101,23 +105,27 @@ class ContextManager:
         return merged
 
     def _write_legacy_config(self, config: dict) -> None:
-        atomic_write_json(self.config_path, self._normalize_config(config))
+        merged = self._load_raw_config_payload()
+        merged.update(self._normalize_config(config))
+        atomic_write_json(self.config_path, merged)
 
     def _load_plot_payload(self) -> dict:
         if self.plot_store.plot_path.exists():
             return self.plot_store.load()
 
-        config = self._load_normalized_config()
+        config = self._load_raw_config_payload()
         return {
-            "plot_outline": str(config.get("plot_outline", "")),
-            "plot_version": str(config.get("plot_version", "0")),
+            "plot_outline": str(config.get("plot_outline", DEFAULT_PLOT["plot_outline"])),
+            "plot_version": str(config.get("plot_version", DEFAULT_PLOT["plot_version"])),
         }
 
     def _write_legacy_plot_shadow(self, payload: dict) -> None:
-        config = self._load_normalized_config()
+        config = self._load_raw_config_payload()
+        if not config:
+            config = DEFAULT_CONFIG.copy()
         config["plot_outline"] = str(payload.get("plot_outline", ""))
         config["plot_version"] = str(payload.get("plot_version", "0"))
-        self._write_legacy_config(config)
+        atomic_write_json(self.config_path, config)
 
     def _normalize_character(self, raw_char: object) -> dict | None:
         if not isinstance(raw_char, dict):
