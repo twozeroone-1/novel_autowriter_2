@@ -54,6 +54,37 @@ def select_context_update_value(suggested_value: str, current_value: str) -> str
     return str(current_value)
 
 
+def build_chapter_context_defaults(
+    *,
+    suggested_state: str,
+    suggested_summary: str,
+    current_snapshot: Mapping[str, Any],
+) -> dict[str, str]:
+    return {
+        "state": select_context_update_value(suggested_state, str(current_snapshot.get("state", ""))),
+        "summary_of_previous": select_context_update_value(
+            suggested_summary,
+            str(current_snapshot.get("summary_of_previous", "")),
+        ),
+    }
+
+
+def persist_chapter_context_update(
+    context: Any,
+    *,
+    state: str,
+    summary_of_previous: str,
+) -> dict[str, str]:
+    normalized_state = str(state)
+    normalized_summary = str(summary_of_previous)
+    context.save_state(normalized_state)
+    context.save_previous_summary(normalized_summary)
+    return {
+        "state": normalized_state,
+        "summary_of_previous": normalized_summary,
+    }
+
+
 def render_workflow_steps(labels: tuple[str, ...], current_step: int) -> None:
     steps = build_workflow_steps(labels, current_step)
     cols = st.columns(len(steps))
@@ -444,34 +475,32 @@ def render_generation_tab(app: Any) -> None:
         if generation_context_result.get("summary_error"):
             st.warning(f"PREVIOUS SUMMARY 제안 생성에 실패했습니다: {generation_context_result['summary_error']}")
 
-        current_config = generator.ctx.get_config()
-        generation_state_default = select_context_update_value(
-            generation_context_result.get("new_state", ""),
-            current_config.get("state", ""),
-        )
-        generation_summary_default = select_context_update_value(
-            generation_context_result.get("new_summary", ""),
-            current_config.get("summary_of_previous", ""),
+        current_snapshot = generator.ctx.get_workspace_settings()
+        generation_defaults = build_chapter_context_defaults(
+            suggested_state=generation_context_result.get("new_state", ""),
+            suggested_summary=generation_context_result.get("new_summary", ""),
+            current_snapshot=current_snapshot,
         )
 
         state_col, summary_col = st.columns(2)
         with state_col:
             generation_state = st.text_area(
                 "검토 후 반영할 CURRENT STATE",
-                value=generation_state_default,
+                value=generation_defaults["state"],
                 height=200,
                 key="generation_context_state",
             )
         with summary_col:
             generation_summary = st.text_area(
                 "검토 후 반영할 PREVIOUS SUMMARY",
-                value=generation_summary_default,
+                value=generation_defaults["summary_of_previous"],
                 height=200,
                 key="generation_context_summary",
             )
 
         if st.button("프로젝트 컨텍스트에 반영", key="apply_generation_context", use_container_width=True):
-            generator.ctx.apply_context_updates(
+            persist_chapter_context_update(
+                generator.ctx,
                 state=generation_state,
                 summary_of_previous=generation_summary,
             )
@@ -657,34 +686,32 @@ def render_review_tab(app: Any) -> None:
             if review_context_result.get("summary_error"):
                 st.warning(f"PREVIOUS SUMMARY 제안 생성에 실패했습니다: {review_context_result['summary_error']}")
 
-            current_config = generator.ctx.get_config()
-            review_state_default = select_context_update_value(
-                review_context_result.get("new_state", ""),
-                current_config.get("state", ""),
-            )
-            review_summary_default = select_context_update_value(
-                review_context_result.get("new_summary", ""),
-                current_config.get("summary_of_previous", ""),
+            current_snapshot = generator.ctx.get_workspace_settings()
+            review_defaults = build_chapter_context_defaults(
+                suggested_state=review_context_result.get("new_state", ""),
+                suggested_summary=review_context_result.get("new_summary", ""),
+                current_snapshot=current_snapshot,
             )
 
             state_col, summary_col = st.columns(2)
             with state_col:
                 review_state = st.text_area(
                     "검토 후 반영할 CURRENT STATE",
-                    value=review_state_default,
+                    value=review_defaults["state"],
                     height=200,
                     key="review_context_state",
                 )
             with summary_col:
                 review_summary = st.text_area(
                     "검토 후 반영할 PREVIOUS SUMMARY",
-                    value=review_summary_default,
+                    value=review_defaults["summary_of_previous"],
                     height=200,
                     key="review_context_summary",
                 )
 
             if st.button("프로젝트 컨텍스트에 반영", key="apply_review_context", use_container_width=True):
-                generator.ctx.apply_context_updates(
+                persist_chapter_context_update(
+                    generator.ctx,
                     state=review_state,
                     summary_of_previous=review_summary,
                 )
@@ -789,33 +816,35 @@ def render_auto_mode_tab(app: Any) -> None:
         st.subheader("다음 회차용 상태 갱신")
         st.markdown("방금 생성한 결과를 바탕으로 `STATE`와 `PREVIOUS SUMMARY`를 검토한 뒤 저장해 주세요.")
 
-        current_config = generator.ctx.get_config()
-        suggested_state = select_context_update_value(result.get("new_state", ""), current_config.get("state", ""))
-        suggested_summary = select_context_update_value(
-            result.get("new_summary", ""),
-            current_config.get("summary_of_previous", ""),
+        current_snapshot = generator.ctx.get_workspace_settings()
+        auto_defaults = build_chapter_context_defaults(
+            suggested_state=result.get("new_state", ""),
+            suggested_summary=result.get("new_summary", ""),
+            current_snapshot=current_snapshot,
         )
         state_col, summary_col = st.columns(2)
         with state_col:
             new_state = st.text_area(
                 "CURRENT STATE 업데이트",
-                value=suggested_state,
+                value=auto_defaults["state"],
                 height=200,
                 help="현재 갈등과 다음 회차 목표를 최신 상태로 정리해 주세요.",
             )
         with summary_col:
             new_summary = st.text_area(
                 "PREVIOUS SUMMARY",
-                value=suggested_summary,
+                value=auto_defaults["summary_of_previous"],
                 height=200,
                 help="자동 갱신 결과를 검토하고 필요하면 수정해 주세요.",
             )
 
         st.divider()
         if st.button("상태 저장 후 READY로 전환", type="primary", use_container_width=True):
-            current_config["state"] = new_state
-            current_config["summary_of_previous"] = new_summary
-            generator.ctx.save_config(current_config)
+            persist_chapter_context_update(
+                generator.ctx,
+                state=new_state,
+                summary_of_previous=new_summary,
+            )
 
             for key in ["auto_result", "auto_title", "auto_inst", "auto_len"]:
                 st.session_state.pop(key, None)

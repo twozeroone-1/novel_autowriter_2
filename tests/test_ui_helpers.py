@@ -33,7 +33,13 @@ from ui.app import (
     load_project_textareas,
     normalize_project_name,
 )
-from ui.chapters import build_session_bound_text_area_kwargs, build_workflow_steps, select_context_update_value
+from ui.chapters import (
+    build_chapter_context_defaults,
+    build_session_bound_text_area_kwargs,
+    build_workflow_steps,
+    persist_chapter_context_update,
+    select_context_update_value,
+)
 from ui.workspace import (
     ProjectFieldSpec,
     apply_pending_project_textarea_updates,
@@ -190,6 +196,66 @@ class TestUiHelpers(unittest.TestCase):
         selected = select_context_update_value("", "old state")
 
         self.assertEqual(selected, "old state")
+
+    def test_build_chapter_context_defaults_prefers_ai_suggestions(self):
+        defaults = build_chapter_context_defaults(
+            suggested_state="new state",
+            suggested_summary="new summary",
+            current_snapshot={
+                "state": "old state",
+                "summary_of_previous": "old summary",
+            },
+        )
+
+        self.assertEqual(defaults["state"], "new state")
+        self.assertEqual(defaults["summary_of_previous"], "new summary")
+
+    def test_build_chapter_context_defaults_falls_back_to_current_snapshot(self):
+        defaults = build_chapter_context_defaults(
+            suggested_state="",
+            suggested_summary="",
+            current_snapshot={
+                "state": "old state",
+                "summary_of_previous": "old summary",
+            },
+        )
+
+        self.assertEqual(defaults["state"], "old state")
+        self.assertEqual(defaults["summary_of_previous"], "old summary")
+
+    def test_persist_chapter_context_update_routes_state_and_summary_separately(self):
+        class FakeContext:
+            def __init__(self):
+                self.calls = []
+
+            def save_state(self, value):
+                self.calls.append(("state", value))
+
+            def save_previous_summary(self, value):
+                self.calls.append(("summary", value))
+
+        context = FakeContext()
+
+        result = persist_chapter_context_update(
+            context,
+            state="latest state",
+            summary_of_previous="latest summary",
+        )
+
+        self.assertEqual(
+            context.calls,
+            [
+                ("state", "latest state"),
+                ("summary", "latest summary"),
+            ],
+        )
+        self.assertEqual(
+            result,
+            {
+                "state": "latest state",
+                "summary_of_previous": "latest summary",
+            },
+        )
 
     def test_resolve_summary_suggestion_source_prefers_pasted_text(self):
         with tempfile.TemporaryDirectory() as tmpdir:
