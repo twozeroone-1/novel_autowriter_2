@@ -6,11 +6,13 @@ from unittest.mock import patch
 
 import core.canon_store as canon_store_module
 import core.context as context_module
+import core.context_state_store as context_state_store_module
 import core.plot_store as plot_store_module
 import core.release_policy_store as release_policy_store_module
 import core.story_bible_store as story_bible_store_module
 from core.canon_store import CanonStore
 from core.context import ContextManager
+from core.context_state_store import ContextStateStore
 from core.plot_store import PlotStore
 from core.release_policy_store import ReleasePolicyStore
 from core.story_bible_store import StoryBibleStore
@@ -281,6 +283,86 @@ class TestContextManager(unittest.TestCase):
 
                 self.assertIn("existing summary", preview)
                 self.assertIn("new summary", preview)
+
+    def test_save_state_updates_state_store_and_legacy_shadow(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                context_state_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ):
+                manager = ContextManager(project_name="sample")
+
+                manager.save_state("new state")
+
+                store = ContextStateStore(project_name="sample")
+                legacy_config = json.loads(manager.config_path.read_text(encoding="utf-8"))
+                self.assertEqual(store.load()["state"], "new state")
+                self.assertEqual(legacy_config["state"], "new state")
+
+    def test_save_previous_summary_updates_state_store_and_legacy_shadow(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                context_state_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ):
+                manager = ContextManager(project_name="sample")
+
+                manager.save_previous_summary("new summary")
+
+                store = ContextStateStore(project_name="sample")
+                legacy_config = json.loads(manager.config_path.read_text(encoding="utf-8"))
+                self.assertEqual(store.load()["summary_of_previous"], "new summary")
+                self.assertEqual(legacy_config["summary_of_previous"], "new summary")
+
+    def test_get_workspace_settings_prefers_context_state_store_over_legacy_config(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                context_state_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ):
+                manager = ContextManager(project_name="sample")
+                manager.config_path.write_text(
+                    json.dumps(
+                        {
+                            **context_module.DEFAULT_CONFIG,
+                            "state": "legacy state",
+                            "summary_of_previous": "legacy summary",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+                ContextStateStore(project_name="sample").save(
+                    {
+                        "state": "stored state",
+                        "summary_of_previous": "stored summary",
+                    }
+                )
+
+                workspace_settings = manager.get_workspace_settings()
+
+                self.assertEqual(workspace_settings["state"], "stored state")
+                self.assertEqual(workspace_settings["summary_of_previous"], "stored summary")
+
+    def test_get_workspace_settings_falls_back_to_legacy_state_when_state_store_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                context_state_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ):
+                manager = ContextManager(project_name="sample")
+                manager.config_path.write_text(
+                    json.dumps(
+                        {
+                            **context_module.DEFAULT_CONFIG,
+                            "state": "legacy state",
+                            "summary_of_previous": "legacy summary",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+
+                workspace_settings = manager.get_workspace_settings()
+
+                self.assertEqual(workspace_settings["state"], "legacy state")
+                self.assertEqual(workspace_settings["summary_of_previous"], "legacy summary")
 
     def test_save_config_updates_story_bible_store_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -3,6 +3,7 @@ from pathlib import Path
 
 from core.app_paths import DATA_PROJECTS_DIR
 from core.canon_store import CanonStore
+from core.context_state_store import ContextStateStore
 from core.file_utils import atomic_write_json
 from core.plot_store import DEFAULT_PLOT, PlotStore
 from core.release_policy_store import ReleasePolicyStore
@@ -27,6 +28,7 @@ class ContextManager:
         (self.data_dir / "chapters").mkdir(exist_ok=True)
         self.story_bible_store = StoryBibleStore(project_name=project_name)
         self.canon_store = CanonStore(project_name=project_name)
+        self.context_state_store = ContextStateStore(project_name=project_name, base_dir=BASE_DATA_DIR)
         self.plot_store = PlotStore(project_name=project_name)
         self.release_policy_store = ReleasePolicyStore(project_name=project_name)
 
@@ -127,6 +129,19 @@ class ContextManager:
         config["plot_version"] = str(payload.get("plot_version", "0"))
         atomic_write_json(self.config_path, config)
 
+    def _write_legacy_state_shadow(
+        self,
+        *,
+        state: str | None = None,
+        summary_of_previous: str | None = None,
+    ) -> None:
+        config = self._load_normalized_config()
+        if state is not None:
+            config["state"] = str(state)
+        if summary_of_previous is not None:
+            config["summary_of_previous"] = str(summary_of_previous)
+        self._write_legacy_config(config)
+
     def _get_story_bible_prompt_fields(self) -> dict[str, str]:
         story_bible = self.story_bible_store.load()
         return {
@@ -136,11 +151,21 @@ class ContextManager:
         }
 
     def _get_state_snapshot(self) -> dict[str, str]:
+        if self.context_state_store.context_state_path.exists():
+            return self.context_state_store.load()
         config = self._load_normalized_config()
         return {
             "state": str(config.get("state", DEFAULT_CONFIG["state"])),
             "summary_of_previous": str(config.get("summary_of_previous", DEFAULT_CONFIG["summary_of_previous"])),
         }
+
+    def _merge_state_snapshot_into_config(self, config: dict) -> dict:
+        merged = DEFAULT_CONFIG.copy()
+        merged.update(config)
+        state_snapshot = self._get_state_snapshot()
+        merged["state"] = state_snapshot.get("state", merged["state"])
+        merged["summary_of_previous"] = state_snapshot.get("summary_of_previous", merged["summary_of_previous"])
+        return merged
 
     def _normalize_character(self, raw_char: object) -> dict | None:
         if not isinstance(raw_char, dict):
@@ -233,16 +258,18 @@ class ContextManager:
         return "\n".join(lines)
 
     def get_config(self) -> dict:
-        return self._merge_story_bible_into_config(self._load_normalized_config())
+        config = self._merge_story_bible_into_config(self._load_normalized_config())
+        return self._merge_state_snapshot_into_config(config)
 
     def get_workspace_settings(self) -> dict:
-        config = self._merge_story_bible_into_config(self._load_normalized_config())
+        story_bible_fields = self._get_story_bible_prompt_fields()
+        state_snapshot = self._get_state_snapshot()
         return {
-            "worldview": config.get("worldview", DEFAULT_CONFIG["worldview"]),
-            "tone_and_manner": config.get("tone_and_manner", DEFAULT_CONFIG["tone_and_manner"]),
-            "continuity": config.get("continuity", DEFAULT_CONFIG["continuity"]),
-            "state": config.get("state", DEFAULT_CONFIG["state"]),
-            "summary_of_previous": config.get("summary_of_previous", DEFAULT_CONFIG["summary_of_previous"]),
+            "worldview": story_bible_fields.get("worldview", DEFAULT_CONFIG["worldview"]),
+            "tone_and_manner": story_bible_fields.get("tone_and_manner", DEFAULT_CONFIG["tone_and_manner"]),
+            "continuity": story_bible_fields.get("continuity", DEFAULT_CONFIG["continuity"]),
+            "state": state_snapshot.get("state", DEFAULT_CONFIG["state"]),
+            "summary_of_previous": state_snapshot.get("summary_of_previous", DEFAULT_CONFIG["summary_of_previous"]),
         }
 
     def get_characters(self) -> list[dict]:
@@ -279,14 +306,16 @@ class ContextManager:
         self._write_legacy_config(config)
 
     def save_state(self, state: str) -> None:
-        config = self._load_normalized_config()
-        config["state"] = str(state)
-        self._write_legacy_config(config)
+        snapshot = self._get_state_snapshot()
+        snapshot["state"] = str(state)
+        self.context_state_store.save(snapshot)
+        self._write_legacy_state_shadow(state=snapshot["state"])
 
     def save_previous_summary(self, summary_of_previous: str) -> None:
-        config = self._load_normalized_config()
-        config["summary_of_previous"] = str(summary_of_previous)
-        self._write_legacy_config(config)
+        snapshot = self._get_state_snapshot()
+        snapshot["summary_of_previous"] = str(summary_of_previous)
+        self.context_state_store.save(snapshot)
+        self._write_legacy_state_shadow(summary_of_previous=snapshot["summary_of_previous"])
 
     def save_characters(self, chars_data: list) -> None:
         if not isinstance(chars_data, list):

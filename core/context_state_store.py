@@ -12,12 +12,14 @@ DEFAULT_CONTEXT_STATE = {
 
 
 class ContextStateStore:
-    def __init__(self, project_name: str):
+    def __init__(self, project_name: str, base_dir: Path | None = None):
         self.project_name = project_name
+        self.base_dir = base_dir
 
     @property
     def context_state_path(self) -> Path:
-        return DATA_PROJECTS_DIR / self.project_name / "context_state.json"
+        root_dir = self.base_dir or DATA_PROJECTS_DIR
+        return root_dir / self.project_name / "context_state.json"
 
     def load(self) -> dict:
         if not self.context_state_path.exists():
