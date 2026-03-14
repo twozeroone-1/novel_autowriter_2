@@ -2,6 +2,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
+from core.episode_artifact_store import EpisodeArtifactStore
 from core.file_utils import atomic_write_text
 from core.llm import _extract_first_json_value, generate_text
 from core.context import ContextManager
@@ -10,6 +11,7 @@ class Generator:
     def __init__(self, project_name: str = "default_project"):
         # ContextManager에 project_name 주입
         self.ctx = ContextManager(project_name=project_name)
+        self.artifact_store = EpisodeArtifactStore(project_name=project_name)
         # ContextManager가 생성한 동적 경로를 참조
         self.chapters_dir = self.ctx.data_dir / "chapters"
         self.chapters_dir.mkdir(parents=True, exist_ok=True)
@@ -58,6 +60,9 @@ class Generator:
         if heading_title:
             markdown_text = f"# {heading_title}\n\n{content}"
         atomic_write_text(filepath, markdown_text)
+        if filepath.suffix == ".md":
+            artifact_title = heading_title or filename_title
+            self.artifact_store.create_draft(title=artifact_title, content=markdown_text)
         return str(filepath)
 
     def build_output_path(self, title: str, suffix: str = ".md") -> Path:
