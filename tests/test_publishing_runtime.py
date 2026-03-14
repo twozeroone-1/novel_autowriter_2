@@ -425,6 +425,14 @@ class TestPublishingRuntime(unittest.TestCase):
                 "core.chapter_source.DATA_PROJECTS_DIR", projects_dir
             ), patch("core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir), patch(
                 "core.canon_store.DATA_PROJECTS_DIR", projects_dir
+            ), patch(
+                "core.publishing_runtime.extract_canon_update",
+                return_value={
+                    "people": {"lead": {"mood": "curious"}},
+                    "resources": {},
+                    "hooks": [],
+                    "timeline": [],
+                },
             ):
                 store = PublishingStore(project_name="sample")
                 store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
@@ -456,6 +464,7 @@ class TestPublishingRuntime(unittest.TestCase):
                 input_snapshot_exists = (run_dirs[0] / "input_snapshot.json").exists()
                 quality_report_exists = (run_dirs[0] / "quality_report.json").exists()
                 publish_result_exists = (run_dirs[0] / "publish_result.json").exists()
+                canon_update_snapshot_exists = (run_dirs[0] / "canon_update.json").exists()
                 canon_snapshot_exists = canon_snapshot.exists()
 
         self.assertEqual(queue[0]["status"], "done")
@@ -464,8 +473,11 @@ class TestPublishingRuntime(unittest.TestCase):
         self.assertTrue(input_snapshot_exists)
         self.assertTrue(quality_report_exists)
         self.assertTrue(publish_result_exists)
+        self.assertTrue(canon_update_snapshot_exists)
         self.assertEqual(json.loads(canon_events[0])["episode_id"], "ep_001")
+        self.assertEqual(json.loads(canon_events[0])["canon_update_status"], "applied")
         self.assertEqual(canon_state["timeline"], ["ep_001"])
+        self.assertEqual(canon_state["people"]["lead"]["mood"], "curious")
         self.assertTrue(canon_snapshot_exists)
 
     def test_tick_applies_canon_update_payload_when_publish_succeeds(self):
@@ -523,6 +535,178 @@ class TestPublishingRuntime(unittest.TestCase):
         self.assertEqual(canon_state["resources"]["cash"], 2000)
         self.assertEqual(canon_state["hooks"], ["new hook"])
         self.assertEqual(canon_state["timeline"], ["ep_002"])
+
+    def test_tick_uses_extractor_fallback_when_publish_result_has_no_canon_update(self):
+        runtime_cls = self._load_runtime_cls()
+        now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
+        executor = FakePublishingExecutor(
+            result={
+                "platform_results": {
+                    "munpia": {"status": "done", "success": True},
+                },
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            chapter_path = projects_dir / "sample" / "chapters" / "3화.md"
+            chapter_path.parent.mkdir(parents=True, exist_ok=True)
+            body = "\n".join(f"장면 {index}: 다른 문장입니다." for index in range(80))
+            chapter_path.write_text("# 3화. 낙차\n\n" + body, encoding="utf-8")
+
+            with patch("core.publishing_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.chapter_source.DATA_PROJECTS_DIR", projects_dir
+            ), patch("core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.canon_store.DATA_PROJECTS_DIR", projects_dir
+            ), patch(
+                "core.publishing_runtime.extract_canon_update",
+                return_value={
+                    "people": {"lead": {"mood": "shaken"}},
+                    "hooks": ["fresh hook"],
+                    "resources": {},
+                    "timeline": [],
+                },
+            ):
+                store = PublishingStore(project_name="sample")
+                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                store.save_queue(
+                    [
+                        {
+                            "id": "pub3",
+                            "episode_id": "ep_003",
+                            "chapter_title": "3화. 낙차",
+                            "source_path": "chapters/3화.md",
+                            "status": "pending",
+                            "attempt_count": 0,
+                            "targets": {
+                                "munpia": {"selected": True, "status": "pending"},
+                            },
+                        }
+                    ]
+                )
+                runtime = runtime_cls(store=store, executor=executor)
+
+                runtime.tick(now=now)
+
+                canon_state = json.loads((projects_dir / "sample" / "canon" / "current_state.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(canon_state["people"]["lead"]["mood"], "shaken")
+        self.assertEqual(canon_state["hooks"], ["fresh hook"])
+        self.assertEqual(canon_state["timeline"], ["ep_003"])
+
+    def test_tick_skips_canon_update_when_extractor_fails(self):
+        runtime_cls = self._load_runtime_cls()
+        now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
+        executor = FakePublishingExecutor(
+            result={
+                "platform_results": {
+                    "munpia": {"status": "done", "success": True},
+                },
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            chapter_path = projects_dir / "sample" / "chapters" / "4화.md"
+            chapter_path.parent.mkdir(parents=True, exist_ok=True)
+            body = "\n".join(f"장면 {index}: 다른 문장입니다." for index in range(80))
+            chapter_path.write_text("# 4화. 누락\n\n" + body, encoding="utf-8")
+
+            with patch("core.publishing_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.chapter_source.DATA_PROJECTS_DIR", projects_dir
+            ), patch("core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.canon_store.DATA_PROJECTS_DIR", projects_dir
+            ), patch(
+                "core.publishing_runtime.extract_canon_update",
+                side_effect=RuntimeError("canon extract failed"),
+            ):
+                store = PublishingStore(project_name="sample")
+                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                store.save_queue(
+                    [
+                        {
+                            "id": "pub4",
+                            "episode_id": "ep_004",
+                            "chapter_title": "4화. 누락",
+                            "source_path": "chapters/4화.md",
+                            "status": "pending",
+                            "attempt_count": 0,
+                            "targets": {
+                                "munpia": {"selected": True, "status": "pending"},
+                            },
+                        }
+                    ]
+                )
+                runtime = runtime_cls(store=store, executor=executor)
+
+                runtime.tick(now=now)
+
+                history = store.load_recent_history(limit=10)
+                canon_state_path = projects_dir / "sample" / "canon" / "current_state.json"
+
+        self.assertFalse(canon_state_path.exists())
+        self.assertEqual(history[0]["canon_update"]["status"], "failed")
+        self.assertEqual(history[0]["canon_update"]["source"], "extractor")
+
+    def test_tick_writes_canon_update_snapshot_and_history_record(self):
+        runtime_cls = self._load_runtime_cls()
+        now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
+        executor = FakePublishingExecutor(
+            result={
+                "platform_results": {
+                    "munpia": {"status": "done", "success": True},
+                },
+                "canon_update": {
+                    "people": {"lead": {"mood": "resolved"}},
+                    "resources": {},
+                    "hooks": [],
+                    "timeline": [],
+                },
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            chapter_path = projects_dir / "sample" / "chapters" / "5화.md"
+            chapter_path.parent.mkdir(parents=True, exist_ok=True)
+            body = "\n".join(f"장면 {index}: 다른 문장입니다." for index in range(80))
+            chapter_path.write_text("# 5화. 기록\n\n" + body, encoding="utf-8")
+
+            with patch("core.publishing_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.chapter_source.DATA_PROJECTS_DIR", projects_dir
+            ), patch("core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.canon_store.DATA_PROJECTS_DIR", projects_dir
+            ):
+                store = PublishingStore(project_name="sample")
+                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                store.save_queue(
+                    [
+                        {
+                            "id": "pub5",
+                            "episode_id": "ep_005",
+                            "chapter_title": "5화. 기록",
+                            "source_path": "chapters/5화.md",
+                            "status": "pending",
+                            "attempt_count": 0,
+                            "targets": {
+                                "munpia": {"selected": True, "status": "pending"},
+                            },
+                        }
+                    ]
+                )
+                runtime = runtime_cls(store=store, executor=executor)
+
+                runtime.tick(now=now)
+
+                history = store.load_recent_history(limit=10)
+                run_dirs = list((projects_dir / "sample" / "runs").glob("*"))
+                canon_snapshot_payload = json.loads((run_dirs[0] / "canon_update.json").read_text(encoding="utf-8"))
+                canon_events = (projects_dir / "sample" / "canon" / "events.jsonl").read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(history[0]["canon_update"]["status"], "applied")
+        self.assertEqual(history[0]["canon_update"]["source"], "result")
+        self.assertEqual(canon_snapshot_payload["status"], "applied")
+        self.assertEqual(json.loads(canon_events[0])["canon_update_status"], "applied")
 
 
 if __name__ == "__main__":
