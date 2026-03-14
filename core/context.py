@@ -78,6 +78,29 @@ class ContextManager:
                 merged[key] = value if isinstance(value, str) else str(value)
         return merged
 
+    def _load_normalized_config(self) -> dict:
+        return self._normalize_config(self._load_json(self.config_path))
+
+    def _merge_story_bible_into_config(self, config: dict) -> dict:
+        merged = DEFAULT_CONFIG.copy()
+        merged.update(config)
+        if not self.story_bible_store.story_bible_path.exists():
+            return merged
+
+        story_bible = self.story_bible_store.load()
+
+        if story_bible.get("worldview") != DEFAULT_STORY_BIBLE["worldview"] or merged["worldview"] == DEFAULT_CONFIG["worldview"]:
+            merged["worldview"] = story_bible.get("worldview", merged["worldview"])
+        if story_bible.get("style_guide") != DEFAULT_STORY_BIBLE["style_guide"] or merged["tone_and_manner"] == DEFAULT_CONFIG["tone_and_manner"]:
+            merged["tone_and_manner"] = story_bible.get("style_guide", merged["tone_and_manner"])
+        if story_bible.get("fixed_rules") != DEFAULT_STORY_BIBLE["fixed_rules"] or merged["continuity"] == DEFAULT_CONFIG["continuity"]:
+            merged["continuity"] = story_bible.get("fixed_rules", merged["continuity"])
+
+        return merged
+
+    def _write_legacy_config(self, config: dict) -> None:
+        atomic_write_json(self.config_path, self._normalize_config(config))
+
     def _normalize_character(self, raw_char: object) -> dict | None:
         if not isinstance(raw_char, dict):
             return None
@@ -169,27 +192,24 @@ class ContextManager:
         return "\n".join(lines)
 
     def get_config(self) -> dict:
-        config = self._normalize_config(self._load_json(self.config_path))
-        if not self.story_bible_store.story_bible_path.exists():
-            return config
+        return self._merge_story_bible_into_config(self._load_normalized_config())
 
-        story_bible = self.story_bible_store.load()
-
-        if story_bible.get("worldview") != DEFAULT_STORY_BIBLE["worldview"] or config["worldview"] == DEFAULT_CONFIG["worldview"]:
-            config["worldview"] = story_bible.get("worldview", config["worldview"])
-        if story_bible.get("style_guide") != DEFAULT_STORY_BIBLE["style_guide"] or config["tone_and_manner"] == DEFAULT_CONFIG["tone_and_manner"]:
-            config["tone_and_manner"] = story_bible.get("style_guide", config["tone_and_manner"])
-        if story_bible.get("fixed_rules") != DEFAULT_STORY_BIBLE["fixed_rules"] or config["continuity"] == DEFAULT_CONFIG["continuity"]:
-            config["continuity"] = story_bible.get("fixed_rules", config["continuity"])
-
-        return config
+    def get_workspace_settings(self) -> dict:
+        config = self._merge_story_bible_into_config(self._load_normalized_config())
+        return {
+            "worldview": config.get("worldview", DEFAULT_CONFIG["worldview"]),
+            "tone_and_manner": config.get("tone_and_manner", DEFAULT_CONFIG["tone_and_manner"]),
+            "continuity": config.get("continuity", DEFAULT_CONFIG["continuity"]),
+            "state": config.get("state", DEFAULT_CONFIG["state"]),
+            "summary_of_previous": config.get("summary_of_previous", DEFAULT_CONFIG["summary_of_previous"]),
+        }
 
     def get_characters(self) -> list[dict]:
         return self._normalize_characters(self._load_json(self.chars_path))
 
     def save_config(self, config_data: dict) -> None:
         normalized = self._normalize_config(config_data)
-        atomic_write_json(self.config_path, normalized)
+        self._write_legacy_config(normalized)
         self.story_bible_store.save(
             {
                 "worldview": normalized.get("worldview", DEFAULT_CONFIG["worldview"]),
@@ -197,6 +217,35 @@ class ContextManager:
                 "fixed_rules": normalized.get("continuity", DEFAULT_CONFIG["continuity"]),
             }
         )
+
+    def save_story_bible_sections(
+        self,
+        *,
+        worldview: str,
+        tone_and_manner: str,
+        continuity: str,
+    ) -> None:
+        story_bible = self.story_bible_store.load()
+        story_bible["worldview"] = str(worldview)
+        story_bible["style_guide"] = str(tone_and_manner)
+        story_bible["fixed_rules"] = str(continuity)
+        self.story_bible_store.save(story_bible)
+
+        config = self._load_normalized_config()
+        config["worldview"] = str(worldview)
+        config["tone_and_manner"] = str(tone_and_manner)
+        config["continuity"] = str(continuity)
+        self._write_legacy_config(config)
+
+    def save_state(self, state: str) -> None:
+        config = self._load_normalized_config()
+        config["state"] = str(state)
+        self._write_legacy_config(config)
+
+    def save_previous_summary(self, summary_of_previous: str) -> None:
+        config = self._load_normalized_config()
+        config["summary_of_previous"] = str(summary_of_previous)
+        self._write_legacy_config(config)
 
     def save_characters(self, chars_data: list) -> None:
         if not isinstance(chars_data, list):

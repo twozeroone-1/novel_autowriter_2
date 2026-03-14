@@ -1,19 +1,47 @@
 import tempfile
+import types
 import unittest
 from pathlib import Path
+import sys
+
+
+if "streamlit" not in sys.modules:
+    streamlit_stub = types.ModuleType("streamlit")
+    streamlit_stub.session_state = {}
+    streamlit_stub.set_page_config = lambda *args, **kwargs: None
+
+    def _cache_resource(*args, **kwargs):
+        def decorator(func):
+            return func
+
+        return decorator
+
+    streamlit_stub.cache_resource = _cache_resource
+    sys.modules["streamlit"] = streamlit_stub
+
+if "dotenv" not in sys.modules:
+    dotenv_stub = types.ModuleType("dotenv")
+    dotenv_stub.load_dotenv = lambda *args, **kwargs: None
+    sys.modules["dotenv"] = dotenv_stub
 
 from core.token_budget import get_field_stats
+import ui.app as app_module
 from ui.app import (
     PROJECT_SETTINGS_SUBSECTION_LABELS,
     PROJECT_STATE_KEYS,
     PROJECT_TAB_LABELS,
+    load_project_textareas,
     normalize_project_name,
 )
 from ui.chapters import build_session_bound_text_area_kwargs, build_workflow_steps, select_context_update_value
 from ui.workspace import (
     ProjectFieldSpec,
     apply_pending_project_textarea_updates,
+    build_canon_store_summary,
     build_project_field_panels,
+    build_release_policy_summary,
+    persist_workspace_field,
+    persist_workspace_settings,
     resolve_summary_suggestion_source,
     summarize_text_preview,
 )
@@ -229,6 +257,177 @@ class TestUiHelpers(unittest.TestCase):
                 "대형 플롯",
             ),
         )
+
+    def test_build_canon_store_summary_counts_structured_sections(self):
+        summary = build_canon_store_summary(
+            {
+                "people": {"Hero": {"mood": "alert"}, "Mentor": {"status": "missing"}},
+                "resources": {"cash": 10, "seal": "open"},
+                "hooks": ["missing relic"],
+                "timeline": ["ep_001", "ep_002", "ep_003"],
+            }
+        )
+
+        self.assertEqual(summary.people_count, 2)
+        self.assertEqual(summary.resources_count, 2)
+        self.assertEqual(summary.hooks_count, 1)
+        self.assertEqual(summary.timeline_count, 3)
+
+    def test_build_release_policy_summary_lists_enabled_platforms(self):
+        summary = build_release_policy_summary(
+            {
+                "global": {
+                    "max_daily_releases": 2,
+                    "burst_allowed": True,
+                    "cooldown_failures": 3,
+                },
+                "platforms": {
+                    "munpia": {"enabled": True, "default_times": ["07:00", "21:00"]},
+                    "novelpia": {"enabled": False, "default_times": ["21:00"]},
+                    "royalroad": {"enabled": True, "default_times": ["09:00"]},
+                },
+            }
+        )
+
+        self.assertEqual(summary.max_daily_releases, 2)
+        self.assertTrue(summary.burst_allowed)
+        self.assertEqual(summary.cooldown_failures, 3)
+        self.assertEqual(summary.enabled_platforms, ("munpia", "royalroad"))
+
+    def test_persist_workspace_field_routes_story_bible_updates_through_story_store(self):
+        class FakeContext:
+            def __init__(self):
+                self.calls = []
+
+            def save_story_bible_sections(self, **kwargs):
+                self.calls.append(("story_bible", kwargs))
+
+            def save_state(self, value):
+                self.calls.append(("state", value))
+
+            def save_previous_summary(self, value):
+                self.calls.append(("summary", value))
+
+        context = FakeContext()
+        current_settings = {
+            "worldview": "old world",
+            "tone_and_manner": "old style",
+            "continuity": "old rules",
+            "state": "old state",
+            "summary_of_previous": "old summary",
+        }
+
+        updated = persist_workspace_field(
+            context,
+            current_settings=current_settings,
+            config_key="tone_and_manner",
+            value="new style",
+        )
+
+        self.assertEqual(updated["tone_and_manner"], "new style")
+        self.assertEqual(
+            context.calls,
+            [
+                (
+                    "story_bible",
+                    {
+                        "worldview": "old world",
+                        "tone_and_manner": "new style",
+                        "continuity": "old rules",
+                    },
+                )
+            ],
+        )
+
+    def test_persist_workspace_field_routes_previous_summary_through_summary_boundary(self):
+        class FakeContext:
+            def __init__(self):
+                self.calls = []
+
+            def save_story_bible_sections(self, **kwargs):
+                self.calls.append(("story_bible", kwargs))
+
+            def save_state(self, value):
+                self.calls.append(("state", value))
+
+            def save_previous_summary(self, value):
+                self.calls.append(("summary", value))
+
+        context = FakeContext()
+        current_settings = {
+            "worldview": "old world",
+            "tone_and_manner": "old style",
+            "continuity": "old rules",
+            "state": "old state",
+            "summary_of_previous": "old summary",
+        }
+
+        updated = persist_workspace_field(
+            context,
+            current_settings=current_settings,
+            config_key="summary_of_previous",
+            value="new summary",
+        )
+
+        self.assertEqual(updated["summary_of_previous"], "new summary")
+        self.assertEqual(context.calls, [("summary", "new summary")])
+
+    def test_persist_workspace_settings_routes_story_bible_and_state_separately(self):
+        class FakeContext:
+            def __init__(self):
+                self.calls = []
+
+            def save_story_bible_sections(self, **kwargs):
+                self.calls.append(("story_bible", kwargs))
+
+            def save_state(self, value):
+                self.calls.append(("state", value))
+
+        context = FakeContext()
+        updated = persist_workspace_settings(
+            context,
+            {
+                "worldview": "new world",
+                "tone_and_manner": "new style",
+                "continuity": "new rules",
+                "state": "new state",
+            },
+        )
+
+        self.assertEqual(updated["state"], "new state")
+        self.assertEqual(
+            context.calls,
+            [
+                (
+                    "story_bible",
+                    {
+                        "worldview": "new world",
+                        "tone_and_manner": "new style",
+                        "continuity": "new rules",
+                    },
+                ),
+                ("state", "new state"),
+            ],
+        )
+
+    def test_load_project_textareas_accepts_workspace_settings_snapshot(self):
+        if not hasattr(app_module.st, "session_state") or not isinstance(app_module.st.session_state, dict):
+            app_module.st.session_state = {}
+        app_module.st.session_state.clear()
+
+        load_project_textareas(
+            {
+                "worldview": "snapshot world",
+                "tone_and_manner": "snapshot style",
+                "continuity": "snapshot rules",
+                "state": "snapshot state",
+            }
+        )
+
+        self.assertEqual(app_module.st.session_state["ta_worldview"], "snapshot world")
+        self.assertEqual(app_module.st.session_state["ta_tone"], "snapshot style")
+        self.assertEqual(app_module.st.session_state["ta_continuity"], "snapshot rules")
+        self.assertEqual(app_module.st.session_state["ta_state"], "snapshot state")
 
     def test_apply_pending_project_textarea_updates_applies_and_clears_pending_values(self):
         session_state = {

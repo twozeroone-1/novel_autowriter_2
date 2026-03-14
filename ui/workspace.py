@@ -63,11 +63,28 @@ class ProjectFieldPanel:
     expanded: bool
 
 
+@dataclass(frozen=True)
+class CanonStoreSummary:
+    people_count: int
+    resources_count: int
+    hooks_count: int
+    timeline_count: int
+
+
+@dataclass(frozen=True)
+class ReleasePolicySummary:
+    max_daily_releases: int
+    burst_allowed: bool
+    cooldown_failures: int
+    enabled_platforms: tuple[str, ...]
+
+
 BACKEND_MODE_OPTIONS = {
     "auto": "자동 (CLI 우선, 실패 시 API)",
     "api": "Gemini API만 사용",
     "cli": "Gemini CLI만 사용",
 }
+STORY_BIBLE_FIELD_KEYS = ("worldview", "tone_and_manner", "continuity")
 
 
 def format_cli_status(status: GeminiCliStatus) -> str:
@@ -194,6 +211,77 @@ def summarize_text_preview(text: str, *, max_chars: int = 90, empty_fallback: st
     return f"{normalized[:max_chars].rstrip()}..."
 
 
+def build_canon_store_summary(canon_state: dict[str, Any]) -> CanonStoreSummary:
+    people = canon_state.get("people", {})
+    resources = canon_state.get("resources", {})
+    hooks = canon_state.get("hooks", [])
+    timeline = canon_state.get("timeline", [])
+    return CanonStoreSummary(
+        people_count=len(people) if isinstance(people, dict) else 0,
+        resources_count=len(resources) if isinstance(resources, dict) else 0,
+        hooks_count=len(hooks) if isinstance(hooks, list) else 0,
+        timeline_count=len(timeline) if isinstance(timeline, list) else 0,
+    )
+
+
+def build_release_policy_summary(policy: dict[str, Any]) -> ReleasePolicySummary:
+    global_policy = policy.get("global", {})
+    platforms = policy.get("platforms", {})
+    enabled_platforms = tuple(
+        sorted(
+            platform_name
+            for platform_name, platform_config in platforms.items()
+            if isinstance(platform_config, dict) and platform_config.get("enabled")
+        )
+    )
+    return ReleasePolicySummary(
+        max_daily_releases=int(global_policy.get("max_daily_releases", 0) or 0),
+        burst_allowed=bool(global_policy.get("burst_allowed", False)),
+        cooldown_failures=int(global_policy.get("cooldown_failures", 0) or 0),
+        enabled_platforms=enabled_platforms,
+    )
+
+
+def persist_workspace_field(
+    context: Any,
+    *,
+    current_settings: dict[str, str],
+    config_key: str,
+    value: str,
+) -> dict[str, str]:
+    updated_settings = dict(current_settings)
+    updated_settings[config_key] = value
+
+    if config_key in STORY_BIBLE_FIELD_KEYS:
+        context.save_story_bible_sections(
+            worldview=updated_settings["worldview"],
+            tone_and_manner=updated_settings["tone_and_manner"],
+            continuity=updated_settings["continuity"],
+        )
+        return updated_settings
+
+    if config_key == "state":
+        context.save_state(updated_settings["state"])
+        return updated_settings
+
+    if config_key == "summary_of_previous":
+        context.save_previous_summary(updated_settings["summary_of_previous"])
+        return updated_settings
+
+    raise ValueError(f"Unsupported workspace field: {config_key}")
+
+
+def persist_workspace_settings(context: Any, field_values: dict[str, str]) -> dict[str, str]:
+    updated_settings = dict(field_values)
+    context.save_story_bible_sections(
+        worldview=updated_settings["worldview"],
+        tone_and_manner=updated_settings["tone_and_manner"],
+        continuity=updated_settings["continuity"],
+    )
+    context.save_state(updated_settings["state"])
+    return updated_settings
+
+
 def resolve_summary_suggestion_source(pasted_text: str, latest_chapter_path: Path | None) -> tuple[str, str]:
     normalized_pasted_text = str(pasted_text or "").strip()
     if normalized_pasted_text:
@@ -285,8 +373,12 @@ def maybe_apply_text_assist(
     if transformed_text is None:
         return
 
-    config[config_key] = transformed_text
-    generator.ctx.save_config(config)
+    persist_workspace_field(
+        generator.ctx,
+        current_settings=config,
+        config_key=config_key,
+        value=transformed_text,
+    )
     st.session_state["_pending_project_textarea_reset"] = textarea_key
     st.session_state["_pending_project_notice"] = action.notice
     st.rerun()
@@ -423,6 +515,34 @@ def render_character_management_panel(generator: Generator, config: dict) -> Non
                 st.error(f"알 수 없는 오류가 발생했습니다: {exc}")
 
 
+def render_structured_store_overview(generator: Generator) -> None:
+    canon_summary = build_canon_store_summary(generator.ctx.canon_store.load_current_state())
+    release_summary = build_release_policy_summary(generator.ctx.release_policy_store.load())
+    enabled_platforms = ", ".join(release_summary.enabled_platforms) if release_summary.enabled_platforms else "없음"
+
+    with st.expander("구조화 저장소 현황", expanded=False):
+        st.caption("프로젝트 설정 탭은 Story Bible 편집값을 직접 저장하고, Canon / Release Policy는 읽기 전용 기준선으로 보여 줍니다.")
+
+        canon_col, release_col = st.columns(2)
+        with canon_col:
+            st.markdown("### CANON")
+            st.write(f"- 인물: {canon_summary.people_count}")
+            st.write(f"- 자원: {canon_summary.resources_count}")
+            st.write(f"- 훅: {canon_summary.hooks_count}")
+            st.write(f"- 타임라인: {canon_summary.timeline_count}")
+        with release_col:
+            st.markdown("### RELEASE POLICY")
+            st.write(f"- 일일 최대 발행: {release_summary.max_daily_releases}")
+            st.write(f"- 버스트 허용: {'예' if release_summary.burst_allowed else '아니오'}")
+            st.write(f"- 실패 쿨다운 기준: {release_summary.cooldown_failures}")
+            st.write(f"- 활성 플랫폼: {enabled_platforms}")
+
+        st.caption("저장소 경로")
+        st.code(generator.ctx.story_bible_store.story_bible_path.as_posix(), language="text")
+        st.code(generator.ctx.canon_store.current_state_path.as_posix(), language="text")
+        st.code(generator.ctx.release_policy_store.policy_path.as_posix(), language="text")
+
+
 def render_sidebar(
     *,
     normalize_project_name: Callable[[str], tuple[str | None, str | None]],
@@ -476,7 +596,7 @@ def render_sidebar(
             clear_project_state()
             st.session_state["current_project"] = selected_project
             temp_generator = get_cached_generator(selected_project)
-            load_project_textareas(temp_generator.ctx.get_config())
+            load_project_textareas(temp_generator.ctx.get_workspace_settings())
             st.rerun()
 
         with st.expander("현재 작품 삭제", expanded=False):
@@ -675,7 +795,7 @@ def render_project_settings_tab(
     if pending_project_notice:
         st.success(pending_project_notice)
 
-    config = generator.ctx.get_config()
+    config = generator.ctx.get_workspace_settings()
     field_stats = get_field_stats(config)
     budget_recommendations = get_budget_recommendations(config)
 
@@ -731,11 +851,7 @@ def render_project_settings_tab(
     save_col, info_col = st.columns([1, 4])
     with save_col:
         if st.button("4개 문서 저장", type="primary", use_container_width=True):
-            config["worldview"] = field_values["worldview"]
-            config["tone_and_manner"] = field_values["tone_and_manner"]
-            config["continuity"] = field_values["continuity"]
-            config["state"] = field_values["state"]
-            generator.ctx.save_config(config)
+            persist_workspace_settings(generator.ctx, field_values)
             st.success("프로젝트 설정을 저장했습니다.")
     with info_col:
         st.info("필요한 문서만 저장해도 되지만, 네 문서를 같이 정리하면 생성 품질이 더 안정적입니다.")
@@ -795,13 +911,19 @@ def render_project_settings_tab(
         )
         with save_col:
             if st.button("이전 줄거리 저장", key="save_sum", use_container_width=True):
-                config["summary_of_previous"] = st.session_state.get(summary_text_key, "")
-                generator.ctx.save_config(config)
+                persist_workspace_field(
+                    generator.ctx,
+                    current_settings=config,
+                    config_key="summary_of_previous",
+                    value=st.session_state.get(summary_text_key, ""),
+                )
                 st.success("이전 줄거리를 저장했습니다.")
 
         if st.session_state.get(summary_text_key, "") != summary_value:
             st.caption("현재 내용은 편집기에만 반영된 상태입니다. 저장 버튼을 눌러야 config에 반영됩니다.")
 
+    st.divider()
+    render_structured_store_overview(generator)
     st.divider()
     render_character_management_panel(generator, config)
     st.divider()

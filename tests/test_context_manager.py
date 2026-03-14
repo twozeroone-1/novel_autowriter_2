@@ -183,6 +183,86 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(story_bible["style_guide"], "new style")
                 self.assertEqual(story_bible["fixed_rules"], "new rules")
 
+    def test_get_workspace_settings_reads_story_bible_and_legacy_state_fields(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ):
+                manager = ContextManager(project_name="sample")
+                manager.save_config(
+                    {
+                        **context_module.DEFAULT_CONFIG,
+                        "worldview": "legacy world",
+                        "tone_and_manner": "legacy style",
+                        "continuity": "legacy rules",
+                        "state": "legacy state",
+                        "summary_of_previous": "legacy summary",
+                    }
+                )
+                StoryBibleStore(project_name="sample").save(
+                    {
+                        "worldview": "structured world",
+                        "style_guide": "structured style",
+                        "fixed_rules": "structured rules",
+                        "author_intent": "keep pressure high",
+                    }
+                )
+
+                workspace_settings = manager.get_workspace_settings()
+
+                self.assertEqual(workspace_settings["worldview"], "structured world")
+                self.assertEqual(workspace_settings["tone_and_manner"], "structured style")
+                self.assertEqual(workspace_settings["continuity"], "structured rules")
+                self.assertEqual(workspace_settings["state"], "legacy state")
+                self.assertEqual(workspace_settings["summary_of_previous"], "legacy summary")
+
+    def test_save_story_bible_sections_updates_story_bible_store_and_legacy_config(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ):
+                manager = ContextManager(project_name="sample")
+
+                manager.save_story_bible_sections(
+                    worldview="new world",
+                    tone_and_manner="new style",
+                    continuity="new rules",
+                )
+
+                story_bible = StoryBibleStore(project_name="sample").load()
+                config = manager.get_config()
+
+                self.assertEqual(story_bible["worldview"], "new world")
+                self.assertEqual(story_bible["style_guide"], "new style")
+                self.assertEqual(story_bible["fixed_rules"], "new rules")
+                self.assertEqual(config["worldview"], "new world")
+                self.assertEqual(config["tone_and_manner"], "new style")
+                self.assertEqual(config["continuity"], "new rules")
+
+    def test_save_state_and_previous_summary_update_only_target_fields(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ):
+                manager = ContextManager(project_name="sample")
+                manager.save_story_bible_sections(
+                    worldview="fixed world",
+                    tone_and_manner="fixed style",
+                    continuity="fixed rules",
+                )
+
+                manager.save_state("next confrontation is unavoidable")
+                manager.save_previous_summary("the hero escaped with the contract")
+
+                config = manager.get_config()
+                story_bible = StoryBibleStore(project_name="sample").load()
+
+                self.assertEqual(config["state"], "next confrontation is unavoidable")
+                self.assertEqual(config["summary_of_previous"], "the hero escaped with the contract")
+                self.assertEqual(story_bible["worldview"], "fixed world")
+                self.assertEqual(story_bible["style_guide"], "fixed style")
+                self.assertEqual(story_bible["fixed_rules"], "fixed rules")
+
     def test_build_generation_prompt_includes_all_context_and_plot_when_enabled(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
