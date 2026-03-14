@@ -25,6 +25,20 @@ class TestAutomationStore(unittest.TestCase):
         self.assertFalse(config["generation_options"]["include_plot"])
         self.assertEqual(config["generation_options"]["plot_strength"], "balanced")
 
+    def test_load_automation_config_defaults_disable_legacy_context_updates(self):
+        module = importlib.import_module("core.automation_store")
+        store_cls = getattr(module, "AutomationStore", None)
+        self.assertIsNotNone(store_cls, "AutomationStore should exist")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            with patch.object(module, "DATA_PROJECTS_DIR", projects_dir):
+                store = store_cls(project_name="sample")
+                config = store.load_config()
+
+        self.assertFalse(config["context_updates"]["state"])
+        self.assertFalse(config["context_updates"]["summary"])
+
     def test_load_automation_config_merges_nested_generation_options_defaults(self):
         module = importlib.import_module("core.automation_store")
         store_cls = getattr(module, "AutomationStore", None)

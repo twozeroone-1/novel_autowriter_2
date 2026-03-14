@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Any
 
 from core.app_paths import DATA_PROJECTS_DIR
+from core.canon_candidate import build_canon_candidate_record
 from core.automation_scheduler import is_schedule_due
 from core.automation_store import AutomationStore
 
@@ -63,14 +64,14 @@ class AutomationRuntime:
                     include_plot=include_plot,
                     plot_strength=plot_strength,
                 )
-                context_update = self._apply_context_updates(result, config)
+                context_update = self._process_context_updates(result, config)
                 job["status"] = "done"
                 runtime["status"] = "idle"
                 runtime["current_job_id"] = None
                 runtime["last_run_at"] = now.isoformat()
                 runtime["last_error"] = ""
-                runtime["last_context_update_status"] = context_update["status"]
-                runtime["last_context_update_error"] = context_update.get("error", "")
+                runtime["last_context_update_status"] = context_update["legacy"]["status"]
+                runtime["last_context_update_error"] = context_update["legacy"].get("error", "")
                 self.store.save_queue(queue)
                 self.store.save_runtime(runtime)
                 self.store.append_history(
@@ -103,7 +104,16 @@ class AutomationRuntime:
             }
         )
 
-    def _apply_context_updates(self, result: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+    def _process_context_updates(self, result: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+        legacy = self._apply_legacy_context_updates(result, config)
+        canon_candidate = build_canon_candidate_record(result)
+        return {
+            "status": legacy["status"],
+            "legacy": legacy,
+            "canon_candidate": canon_candidate,
+        }
+
+    def _apply_legacy_context_updates(self, result: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
         context_config = config.get("context_updates", {})
         apply_state = bool(context_config.get("state", True))
         apply_summary = bool(context_config.get("summary", True))

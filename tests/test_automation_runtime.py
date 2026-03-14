@@ -16,6 +16,7 @@ class FakeAutomator:
         self.before_return = None
         self.apply_calls = []
         self.run_calls = []
+        self.result_override = None
 
     def run_single_cycle(
         self,
@@ -31,11 +32,14 @@ class FakeAutomator:
             self.before_return()
         if self.should_fail:
             raise RuntimeError("boom")
-        return {
+        result = {
             "saved_path": f"/tmp/{chapter_title}.md",
             "new_summary": "summary",
             "new_state": "state",
         }
+        if isinstance(self.result_override, dict):
+            result.update(self.result_override)
+        return result
 
     def apply_context_updates(self, *, state: str | None = None, summary_of_previous: str | None = None):
         self.apply_calls.append((state, summary_of_previous))
@@ -60,7 +64,7 @@ class TestAutomationRuntime(unittest.TestCase):
         self.assertIsNotNone(runtime_cls, "AutomationRuntime should exist")
         return runtime_cls
 
-    def test_runtime_executes_next_pending_job_marks_done_and_applies_context(self):
+    def test_runtime_executes_next_pending_job_marks_done_and_applies_legacy_context_when_enabled(self):
         runtime_cls = self._load_runtime_cls()
         now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
 
@@ -68,7 +72,13 @@ class TestAutomationRuntime(unittest.TestCase):
             projects_dir = Path(tmpdir) / "projects"
             with patch("core.automation_store.DATA_PROJECTS_DIR", projects_dir):
                 store = AutomationStore(project_name="sample")
-                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                store.save_config(
+                    {
+                        "enabled": True,
+                        "schedule": {"type": "daily", "time": "21:00"},
+                        "context_updates": {"state": True, "summary": True},
+                    }
+                )
                 store.save_queue(
                     [
                         {
@@ -97,7 +107,8 @@ class TestAutomationRuntime(unittest.TestCase):
         self.assertEqual(len(history), 1)
         self.assertEqual(fake_automator.apply_calls, [("state", "summary")])
         self.assertEqual(fake_automator.run_calls[0], ("Episode 12", "scene instruction", 5000, False, "balanced"))
-        self.assertEqual(history[0]["context_update"]["status"], "applied")
+        self.assertEqual(history[0]["context_update"]["legacy"]["status"], "applied")
+        self.assertEqual(history[0]["context_update"]["canon_candidate"]["status"], "missing")
 
     def test_runtime_passes_saved_plot_generation_options_to_automator(self):
         runtime_cls = self._load_runtime_cls()
@@ -225,6 +236,38 @@ class TestAutomationRuntime(unittest.TestCase):
 
         self.assertEqual(fake_automator.call_count, 0)
 
+    def test_runtime_skips_legacy_context_apply_by_default(self):
+        runtime_cls = self._load_runtime_cls()
+        now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            with patch("core.automation_store.DATA_PROJECTS_DIR", projects_dir):
+                store = AutomationStore(project_name="sample")
+                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                store.save_queue(
+                    [
+                        {
+                            "id": "job1",
+                            "title": "Episode 12",
+                            "instruction": "scene instruction",
+                            "target_length": 5000,
+                            "status": "pending",
+                            "attempt_count": 0,
+                        }
+                    ]
+                )
+                fake_automator = FakeAutomator()
+                runtime = runtime_cls(store=store, automator=fake_automator)
+
+                runtime.tick(now=now)
+
+                history = store.load_recent_history(limit=10)
+
+        self.assertEqual(fake_automator.apply_calls, [])
+        self.assertEqual(history[0]["context_update"]["legacy"]["status"], "skipped")
+        self.assertEqual(history[0]["context_update"]["canon_candidate"]["status"], "missing")
+
     def test_runtime_skips_context_apply_when_disabled(self):
         runtime_cls = self._load_runtime_cls()
         now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
@@ -260,7 +303,46 @@ class TestAutomationRuntime(unittest.TestCase):
                 history = store.load_recent_history(limit=10)
 
         self.assertEqual(fake_automator.apply_calls, [])
-        self.assertEqual(history[0]["context_update"]["status"], "skipped")
+        self.assertEqual(history[0]["context_update"]["legacy"]["status"], "skipped")
+        self.assertEqual(history[0]["context_update"]["canon_candidate"]["status"], "missing")
+
+    def test_runtime_records_canon_candidate_from_cycle_result(self):
+        runtime_cls = self._load_runtime_cls()
+        now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            with patch("core.automation_store.DATA_PROJECTS_DIR", projects_dir):
+                store = AutomationStore(project_name="sample")
+                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                store.save_queue(
+                    [
+                        {
+                            "id": "job1",
+                            "title": "Episode 12",
+                            "instruction": "scene instruction",
+                            "target_length": 5000,
+                            "status": "pending",
+                            "attempt_count": 0,
+                        }
+                    ]
+                )
+                fake_automator = FakeAutomator()
+                fake_automator.result_override = {
+                    "canon_update": {
+                        "people": {"lead": {"mood": "angry"}},
+                        "hooks": ["new hook"],
+                    }
+                }
+                runtime = runtime_cls(store=store, automator=fake_automator)
+
+                runtime.tick(now=now)
+
+                history = store.load_recent_history(limit=10)
+
+        self.assertEqual(history[0]["context_update"]["canon_candidate"]["status"], "recorded")
+        self.assertEqual(history[0]["context_update"]["canon_candidate"]["candidate"]["people"]["lead"]["mood"], "angry")
+        self.assertEqual(history[0]["context_update"]["canon_candidate"]["candidate"]["hooks"], ["new hook"])
 
     def test_run_automation_pass_processes_enabled_projects(self):
         module = importlib.import_module("core.automation_runtime")

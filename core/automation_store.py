@@ -18,8 +18,8 @@ DEFAULT_AUTOMATION_CONFIG = {
         "max_attempts": 2,
     },
     "context_updates": {
-        "state": True,
-        "summary": True,
+        "state": False,
+        "summary": False,
     },
     "generation_options": {
         "include_plot": False,
