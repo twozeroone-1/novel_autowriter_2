@@ -63,12 +63,7 @@ class TestContextManager(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)):
                 manager = ContextManager(project_name="sample")
-                manager.save_config(
-                    {
-                        **context_module.DEFAULT_CONFIG,
-                        "summary_of_previous": "existing summary",
-                    }
-                )
+                manager.save_previous_summary("existing summary")
 
                 manager.update_summary("new summary")
 
@@ -89,12 +84,7 @@ class TestContextManager(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)):
                 manager = ContextManager(project_name="sample")
-                manager.save_config(
-                    {
-                        **context_module.DEFAULT_CONFIG,
-                        "summary_of_previous": "a" * 2995,
-                    }
-                )
+                manager.save_previous_summary("a" * 2995)
                 fake_generator = FakeGenerator()
 
                 manager.update_summary("b" * 20, generator_instance=fake_generator)
@@ -126,12 +116,7 @@ class TestContextManager(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)):
                 manager = ContextManager(project_name="sample")
-                manager.save_config(
-                    {
-                        **context_module.DEFAULT_CONFIG,
-                        "summary_of_previous": "existing summary",
-                    }
-                )
+                manager.save_previous_summary("existing summary")
 
                 preview = manager.build_updated_summary_text("new summary")
 
@@ -143,13 +128,8 @@ class TestContextManager(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)):
                 manager = ContextManager(project_name="sample")
-                manager.save_config(
-                    {
-                        **context_module.DEFAULT_CONFIG,
-                        "state": "old state",
-                        "summary_of_previous": "old summary",
-                    }
-                )
+                manager.save_state("old state")
+                manager.save_previous_summary("old summary")
 
                 result = manager.apply_context_updates(
                     state="new state",
@@ -168,13 +148,8 @@ class TestContextManager(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)):
                 manager = ContextManager(project_name="sample")
-                manager.save_config(
-                    {
-                        **context_module.DEFAULT_CONFIG,
-                        "state": "old state",
-                        "summary_of_previous": "old summary",
-                    }
-                )
+                manager.save_state("old state")
+                manager.save_previous_summary("old summary")
 
                 with patch.object(manager, "save_state", wraps=manager.save_state) as save_state, patch.object(
                     manager,
@@ -392,15 +367,19 @@ class TestContextManager(unittest.TestCase):
                 story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
             ):
                 manager = ContextManager(project_name="sample")
-                manager.save_config(
-                    {
-                        **context_module.DEFAULT_CONFIG,
-                        "worldview": "legacy world",
-                        "tone_and_manner": "legacy style",
-                        "continuity": "legacy rules",
-                        "state": "legacy state",
-                        "summary_of_previous": "legacy summary",
-                    }
+                manager.config_path.write_text(
+                    json.dumps(
+                        {
+                            **context_module.DEFAULT_CONFIG,
+                            "worldview": "legacy world",
+                            "tone_and_manner": "legacy style",
+                            "continuity": "legacy rules",
+                            "state": "legacy state",
+                            "summary_of_previous": "legacy summary",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
                 )
                 StoryBibleStore(project_name="sample").save(
                     {
@@ -570,6 +549,66 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(plot_payload["plot_outline"], "stored plot")
                 self.assertEqual(plot_payload["plot_version"], "1")
 
+    def test_save_config_ignores_state_fields_and_preserves_existing_context_state_store_value(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ), patch.object(context_state_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)):
+                manager = ContextManager(project_name="sample")
+                manager.save_state("stored state")
+                manager.save_previous_summary("stored summary")
+
+                manager.save_config(
+                    {
+                        **context_module.DEFAULT_CONFIG,
+                        "worldview": "new world",
+                        "tone_and_manner": "new style",
+                        "continuity": "new rules",
+                        "state": "ignored state",
+                        "summary_of_previous": "ignored summary",
+                    }
+                )
+
+                config = manager.get_config()
+                state_payload = ContextStateStore(project_name="sample").load()
+                legacy_config = json.loads(manager.config_path.read_text(encoding="utf-8"))
+
+                self.assertEqual(config["worldview"], "new world")
+                self.assertEqual(config["state"], "stored state")
+                self.assertEqual(config["summary_of_previous"], "stored summary")
+                self.assertEqual(state_payload["state"], "stored state")
+                self.assertEqual(state_payload["summary_of_previous"], "stored summary")
+                self.assertEqual(legacy_config["state"], "stored state")
+                self.assertEqual(legacy_config["summary_of_previous"], "stored summary")
+
+    def test_save_config_does_not_create_context_state_store_from_state_fields(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ), patch.object(context_state_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)):
+                manager = ContextManager(project_name="sample")
+
+                manager.save_config(
+                    {
+                        **context_module.DEFAULT_CONFIG,
+                        "worldview": "new world",
+                        "tone_and_manner": "new style",
+                        "continuity": "new rules",
+                        "state": "ignored state",
+                        "summary_of_previous": "ignored summary",
+                    }
+                )
+
+                state_store = ContextStateStore(project_name="sample")
+                legacy_config = json.loads(manager.config_path.read_text(encoding="utf-8"))
+
+                self.assertFalse(state_store.context_state_path.exists())
+                self.assertEqual(legacy_config["state"], context_module.DEFAULT_CONFIG["state"])
+                self.assertEqual(
+                    legacy_config["summary_of_previous"],
+                    context_module.DEFAULT_CONFIG["summary_of_previous"],
+                )
+
     def test_save_plot_outline_updates_plot_store_and_legacy_shadow_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
@@ -635,16 +674,13 @@ class TestContextManager(unittest.TestCase):
                 release_policy_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
             ):
                 manager = ContextManager(project_name="sample")
-                manager.save_config(
-                    {
-                        **context_module.DEFAULT_CONFIG,
-                        "worldview": "world data",
-                        "tone_and_manner": "tone guide",
-                        "continuity": "fixed rules",
-                        "state": "current state",
-                        "summary_of_previous": "previous summary",
-                    }
+                manager.save_story_bible_sections(
+                    worldview="world data",
+                    tone_and_manner="tone guide",
+                    continuity="fixed rules",
                 )
+                manager.save_state("current state")
+                manager.save_previous_summary("previous summary")
                 manager.save_plot_outline("plot outline text")
                 CanonStore(project_name="sample").save_current_state(
                     {

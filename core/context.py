@@ -277,7 +277,11 @@ class ContextManager:
 
     def save_config(self, config_data: dict) -> None:
         normalized = self._normalize_config(config_data)
-        self._write_legacy_config(normalized)
+        legacy_config = self._load_normalized_config()
+        legacy_config["worldview"] = normalized.get("worldview", DEFAULT_CONFIG["worldview"])
+        legacy_config["tone_and_manner"] = normalized.get("tone_and_manner", DEFAULT_CONFIG["tone_and_manner"])
+        legacy_config["continuity"] = normalized.get("continuity", DEFAULT_CONFIG["continuity"])
+        self._write_legacy_config(legacy_config)
         self.story_bible_store.save(
             {
                 "worldview": normalized.get("worldview", DEFAULT_CONFIG["worldview"]),
