@@ -2,7 +2,10 @@ import json
 from pathlib import Path
 
 from core.app_paths import DATA_PROJECTS_DIR
+from core.canon_store import CanonStore
 from core.file_utils import atomic_write_json
+from core.release_policy_store import ReleasePolicyStore
+from core.story_bible_store import DEFAULT_STORY_BIBLE, StoryBibleStore
 
 
 BASE_DATA_DIR = DATA_PROJECTS_DIR
@@ -23,6 +26,9 @@ class ContextManager:
         self.data_dir = BASE_DATA_DIR / self.project_name
         self.data_dir.mkdir(parents=True, exist_ok=True)
         (self.data_dir / "chapters").mkdir(exist_ok=True)
+        self.story_bible_store = StoryBibleStore(project_name=project_name)
+        self.canon_store = CanonStore(project_name=project_name)
+        self.release_policy_store = ReleasePolicyStore(project_name=project_name)
 
         self.config_path = self.data_dir / "config.json"
         self.chars_path = self.data_dir / "characters.json"
@@ -30,7 +36,7 @@ class ContextManager:
 
     def _ensure_default_files(self) -> None:
         if not self.config_path.exists():
-            self.save_config(DEFAULT_CONFIG)
+            atomic_write_json(self.config_path, DEFAULT_CONFIG.copy())
         if not self.chars_path.exists():
             self.save_characters([])
 
@@ -128,6 +134,18 @@ class ContextManager:
 {continuity}
 """
 
+    def get_canon_context(self) -> str:
+        canon_state = self.canon_store.load_current_state()
+        return f"""[CANON FACTS] (발행 완료 회차 기준 확정 사실)
+{json.dumps(canon_state, ensure_ascii=False, indent=2)}
+"""
+
+    def get_release_policy_context(self) -> str:
+        release_policy = self.release_policy_store.load()
+        return f"""[RELEASE POLICY] (플랫폼별 발행 정책)
+{json.dumps(release_policy, ensure_ascii=False, indent=2)}
+"""
+
     def get_state_context(self) -> str:
         config = self.get_config()
         state_info = config.get("state", "")
@@ -151,13 +169,34 @@ class ContextManager:
         return "\n".join(lines)
 
     def get_config(self) -> dict:
-        return self._normalize_config(self._load_json(self.config_path))
+        config = self._normalize_config(self._load_json(self.config_path))
+        if not self.story_bible_store.story_bible_path.exists():
+            return config
+
+        story_bible = self.story_bible_store.load()
+
+        if story_bible.get("worldview") != DEFAULT_STORY_BIBLE["worldview"] or config["worldview"] == DEFAULT_CONFIG["worldview"]:
+            config["worldview"] = story_bible.get("worldview", config["worldview"])
+        if story_bible.get("style_guide") != DEFAULT_STORY_BIBLE["style_guide"] or config["tone_and_manner"] == DEFAULT_CONFIG["tone_and_manner"]:
+            config["tone_and_manner"] = story_bible.get("style_guide", config["tone_and_manner"])
+        if story_bible.get("fixed_rules") != DEFAULT_STORY_BIBLE["fixed_rules"] or config["continuity"] == DEFAULT_CONFIG["continuity"]:
+            config["continuity"] = story_bible.get("fixed_rules", config["continuity"])
+
+        return config
 
     def get_characters(self) -> list[dict]:
         return self._normalize_characters(self._load_json(self.chars_path))
 
     def save_config(self, config_data: dict) -> None:
-        atomic_write_json(self.config_path, self._normalize_config(config_data))
+        normalized = self._normalize_config(config_data)
+        atomic_write_json(self.config_path, normalized)
+        self.story_bible_store.save(
+            {
+                "worldview": normalized.get("worldview", DEFAULT_CONFIG["worldview"]),
+                "style_guide": normalized.get("tone_and_manner", DEFAULT_CONFIG["tone_and_manner"]),
+                "fixed_rules": normalized.get("continuity", DEFAULT_CONFIG["continuity"]),
+            }
+        )
 
     def save_characters(self, chars_data: list) -> None:
         if not isinstance(chars_data, list):
@@ -269,6 +308,8 @@ class ContextManager:
         world_ctx = self.get_worldview_context()
         char_ctx = self.get_character_context()
         continuity_ctx = self.get_continuity_context()
+        canon_ctx = self.get_canon_context()
+        release_policy_ctx = self.get_release_policy_context()
         state_ctx = self.get_state_context()
         plot_block = self.build_plot_block(include_plot=include_plot, plot_strength=plot_strength)
         if False:
@@ -285,6 +326,8 @@ CONTINUITY를 깨지 말고, STATE의 갈등과 감정선을 자연스럽게 이
 
 {world_ctx}
 {continuity_ctx}
+{canon_ctx}
+{release_policy_ctx}
 {state_ctx}
 {char_ctx}
 {plot_block}
