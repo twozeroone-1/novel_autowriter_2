@@ -1,8 +1,10 @@
 import tempfile
 import types
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
 import sys
+from unittest.mock import patch
 
 
 if "streamlit" not in sys.modules:
@@ -38,6 +40,7 @@ from ui.chapters import (
     build_session_bound_text_area_kwargs,
     build_workflow_steps,
     persist_chapter_context_update,
+    render_generation_budget_panel,
     select_context_update_value,
 )
 from ui.workspace import (
@@ -256,6 +259,72 @@ class TestUiHelpers(unittest.TestCase):
                 "summary_of_previous": "latest summary",
             },
         )
+
+    def test_render_generation_budget_panel_reads_workspace_snapshot_for_budget_guidance(self):
+        class FakeStreamlit:
+            def __init__(self):
+                self.session_state = {}
+
+            def expander(self, *args, **kwargs):
+                return nullcontext()
+
+            def caption(self, *args, **kwargs):
+                return None
+
+            def metric(self, *args, **kwargs):
+                return None
+
+            def dataframe(self, *args, **kwargs):
+                return None
+
+            def write(self, *args, **kwargs):
+                return None
+
+            def button(self, *args, **kwargs):
+                return False
+
+            def error(self, *args, **kwargs):
+                return None
+
+            def info(self, *args, **kwargs):
+                return None
+
+        class FakeContext:
+            def __init__(self):
+                self.workspace_calls = 0
+                self.config_calls = 0
+
+            def get_workspace_settings(self):
+                self.workspace_calls += 1
+                return {
+                    "worldview": "world",
+                    "tone_and_manner": "style",
+                    "continuity": "rules",
+                    "state": "state",
+                    "summary_of_previous": "summary",
+                }
+
+            def get_config(self):
+                self.config_calls += 1
+                raise AssertionError("budget guidance should not read get_config")
+
+            def build_generation_prompt(self, *args, **kwargs):
+                return "prompt"
+
+        fake_context = FakeContext()
+        fake_generator = types.SimpleNamespace(ctx=fake_context)
+
+        with patch.object(sys.modules["ui.chapters"], "st", FakeStreamlit()):
+            render_generation_budget_panel(
+                fake_generator,
+                user_instruction="advance the plot",
+                target_length=5000,
+                use_plot=True,
+                plot_strength="strict",
+            )
+
+        self.assertEqual(fake_context.workspace_calls, 1)
+        self.assertEqual(fake_context.config_calls, 0)
 
     def test_resolve_summary_suggestion_source_prefers_pasted_text(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -97,6 +97,26 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(len(fake_generator.calls), 1)
                 self.assertEqual(manager.get_config()["summary_of_previous"], "compressed summary")
 
+    def test_update_summary_uses_dedicated_summary_save_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)):
+                manager = ContextManager(project_name="sample")
+                manager.save_config(
+                    {
+                        **context_module.DEFAULT_CONFIG,
+                        "summary_of_previous": "existing summary",
+                    }
+                )
+                expected_summary = manager.build_updated_summary_text("new summary")
+
+                with patch.object(manager, "save_previous_summary") as save_previous_summary, patch.object(
+                    manager, "save_config"
+                ) as save_config:
+                    manager.update_summary("new summary")
+
+                save_previous_summary.assert_called_once_with(expected_summary)
+                save_config.assert_not_called()
+
     def test_build_updated_summary_text_returns_combined_preview_without_saving(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)):
@@ -137,6 +157,44 @@ class TestContextManager(unittest.TestCase):
                 self.assertTrue(result["applied"]["state"])
                 self.assertTrue(result["applied"]["summary_of_previous"])
                 self.assertEqual(config["state"], "new state")
+                self.assertEqual(config["summary_of_previous"], "new summary")
+
+    def test_apply_context_updates_only_persists_non_empty_overrides(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)):
+                manager = ContextManager(project_name="sample")
+                manager.save_config(
+                    {
+                        **context_module.DEFAULT_CONFIG,
+                        "state": "old state",
+                        "summary_of_previous": "old summary",
+                    }
+                )
+
+                with patch.object(manager, "save_state", wraps=manager.save_state) as save_state, patch.object(
+                    manager,
+                    "save_previous_summary",
+                    wraps=manager.save_previous_summary,
+                ) as save_previous_summary, patch.object(
+                    manager,
+                    "save_config",
+                    side_effect=AssertionError("save_config should not be used"),
+                ):
+                    result = manager.apply_context_updates(
+                        state="   ",
+                        summary_of_previous="new summary",
+                    )
+
+                config = manager.get_config()
+                save_state.assert_not_called()
+                save_previous_summary.assert_called_once_with("new summary")
+                self.assertEqual(result["backup"]["state"], "old state")
+                self.assertEqual(result["backup"]["summary_of_previous"], "old summary")
+                self.assertFalse(result["applied"]["state"])
+                self.assertTrue(result["applied"]["summary_of_previous"])
+                self.assertEqual(result["current"]["state"], "old state")
+                self.assertEqual(result["current"]["summary_of_previous"], "new summary")
+                self.assertEqual(config["state"], "old state")
                 self.assertEqual(config["summary_of_previous"], "new summary")
 
     def test_get_config_reads_story_bible_fields_from_structured_store(self):
@@ -238,6 +296,43 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(config["worldview"], "new world")
                 self.assertEqual(config["tone_and_manner"], "new style")
                 self.assertEqual(config["continuity"], "new rules")
+
+    def test_update_worldview_uses_story_bible_save_path_and_preserves_other_sections(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ):
+                manager = ContextManager(project_name="sample")
+                manager.save_story_bible_sections(
+                    worldview="old world",
+                    tone_and_manner="existing style",
+                    continuity="existing rules",
+                )
+
+                with patch.object(
+                    manager,
+                    "save_story_bible_sections",
+                    wraps=manager.save_story_bible_sections,
+                ) as save_story_bible_sections, patch.object(
+                    manager,
+                    "save_config",
+                    side_effect=AssertionError("save_config should not be used"),
+                ):
+                    manager.update_worldview("new world")
+
+                save_story_bible_sections.assert_called_once_with(
+                    worldview="new world",
+                    tone_and_manner="existing style",
+                    continuity="existing rules",
+                )
+                story_bible = StoryBibleStore(project_name="sample").load()
+                config = manager.get_config()
+                self.assertEqual(story_bible["worldview"], "new world")
+                self.assertEqual(story_bible["style_guide"], "existing style")
+                self.assertEqual(story_bible["fixed_rules"], "existing rules")
+                self.assertEqual(config["worldview"], "new world")
+                self.assertEqual(config["tone_and_manner"], "existing style")
+                self.assertEqual(config["continuity"], "existing rules")
 
     def test_save_state_and_previous_summary_update_only_target_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:

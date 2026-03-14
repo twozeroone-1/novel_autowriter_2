@@ -234,7 +234,7 @@ def render_generation_budget_panel(
     use_plot: bool,
     plot_strength: str,
 ) -> None:
-    budget_config = generator.ctx.get_config()
+    budget_config = generator.ctx.get_workspace_settings()
     field_stats = get_field_stats(budget_config)
     recommendations = get_budget_recommendations(budget_config)
     total_core_chars = sum(row["chars"] for row in field_stats)

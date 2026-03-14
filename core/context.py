@@ -271,9 +271,8 @@ class ContextManager:
         return updated_summary
 
     def update_summary(self, new_summary: str, generator_instance=None) -> None:
-        config = self.get_config()
-        config["summary_of_previous"] = self.build_updated_summary_text(new_summary, generator_instance=generator_instance)
-        self.save_config(config)
+        updated_summary = self.build_updated_summary_text(new_summary, generator_instance=generator_instance)
+        self.save_previous_summary(updated_summary)
 
     def apply_context_updates(
         self,
@@ -281,38 +280,44 @@ class ContextManager:
         state: str | None = None,
         summary_of_previous: str | None = None,
     ) -> dict:
-        config = self.get_config()
+        workspace_settings = self.get_workspace_settings()
         backup = {
-            "state": config.get("state", ""),
-            "summary_of_previous": config.get("summary_of_previous", ""),
+            "state": workspace_settings.get("state", ""),
+            "summary_of_previous": workspace_settings.get("summary_of_previous", ""),
         }
         applied = {
             "state": False,
             "summary_of_previous": False,
         }
+        current_state = backup["state"]
+        current_summary = backup["summary_of_previous"]
 
         if state is not None and str(state).strip():
-            config["state"] = str(state)
+            current_state = str(state)
+            self.save_state(current_state)
             applied["state"] = True
 
         if summary_of_previous is not None and str(summary_of_previous).strip():
-            config["summary_of_previous"] = str(summary_of_previous)
+            current_summary = str(summary_of_previous)
+            self.save_previous_summary(current_summary)
             applied["summary_of_previous"] = True
 
-        self.save_config(config)
         return {
             "backup": backup,
             "applied": applied,
             "current": {
-                "state": config.get("state", ""),
-                "summary_of_previous": config.get("summary_of_previous", ""),
+                "state": current_state,
+                "summary_of_previous": current_summary,
             },
         }
 
     def update_worldview(self, new_worldview: str) -> None:
-        config = self.get_config()
-        config["worldview"] = new_worldview
-        self.save_config(config)
+        workspace_settings = self.get_workspace_settings()
+        self.save_story_bible_sections(
+            worldview=str(new_worldview),
+            tone_and_manner=workspace_settings.get("tone_and_manner", DEFAULT_CONFIG["tone_and_manner"]),
+            continuity=workspace_settings.get("continuity", DEFAULT_CONFIG["continuity"]),
+        )
 
     def get_plot_outline(self) -> str:
         return self.get_config().get("plot_outline", "").strip()

@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -5,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from core.token_budget import (
+    build_workspace_budget_snapshot,
     estimate_generation_cost_report,
     find_latest_sample_chapter,
     get_budget_recommendations,
@@ -47,6 +49,30 @@ class TestTokenBudget(unittest.TestCase):
         self.assertTrue(any("CONTINUITY" in message for message in recommendations))
         self.assertTrue(any("PREVIOUS_SUMMARY" in message for message in recommendations))
 
+    def test_build_workspace_budget_snapshot_ignores_non_workspace_fields(self):
+        snapshot = build_workspace_budget_snapshot(
+            {
+                "worldview": "world",
+                "tone_and_manner": "style",
+                "continuity": "rules",
+                "state": "state",
+                "summary_of_previous": "summary",
+                "plot_outline": "should be ignored",
+                "extra_field": 123,
+            }
+        )
+
+        self.assertEqual(
+            snapshot,
+            {
+                "worldview": "world",
+                "tone_and_manner": "style",
+                "continuity": "rules",
+                "state": "state",
+                "summary_of_previous": "summary",
+            },
+        )
+
     def test_find_latest_sample_chapter_skips_auxiliary_outputs(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             chapters_dir = Path(tmpdir)
@@ -55,13 +81,14 @@ class TestTokenBudget(unittest.TestCase):
             auxiliary_review = chapters_dir / "1화_검토리포트.md"
             auxiliary_revised = chapters_dir / "1화_수정본.md"
             newer_chapter = chapters_dir / "2화.md"
+            base_mtime = 1_700_000_000
 
             for index, path in enumerate(
                 [draft_path, auxiliary_draft, auxiliary_review, auxiliary_revised, newer_chapter],
                 start=1,
             ):
                 path.write_text(path.stem, encoding="utf-8")
-                path.touch()
+                os.utime(path, (base_mtime + index, base_mtime + index))
 
             latest = find_latest_sample_chapter(chapters_dir)
 

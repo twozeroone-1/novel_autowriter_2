@@ -2,7 +2,7 @@ import json
 import os
 import urllib.request
 from pathlib import Path
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 from core.generator import Generator
 from core.model_catalog import get_model_pricing
@@ -38,6 +38,14 @@ FIELD_BUDGETS = {
 DEFAULT_OUTPUT_TOKEN_RATIO = 0.62
 
 
+def build_workspace_budget_snapshot(snapshot: Mapping[str, Any]) -> dict[str, str]:
+    normalized: dict[str, str] = {}
+    for key in FIELD_BUDGETS:
+        value = snapshot.get(key, "")
+        normalized[key] = "" if value is None else str(value)
+    return normalized
+
+
 def _get_primary_api_key() -> str:
     api_key_env = os.getenv("GOOGLE_API_KEY", "")
     keys = [key.strip() for key in api_key_env.split(",") if key.strip()]
@@ -68,9 +76,10 @@ def count_text_tokens(text: str, model_name: str) -> int:
 
 
 def get_field_stats(config: dict) -> list[dict]:
+    budget_snapshot = build_workspace_budget_snapshot(config)
     rows = []
     for key, meta in FIELD_BUDGETS.items():
-        chars = len(str(config.get(key, "")))
+        chars = len(budget_snapshot[key])
         recommended = meta["recommended_max_chars"]
         if chars == 0:
             status = "비어 있음"
@@ -95,7 +104,7 @@ def get_field_stats(config: dict) -> list[dict]:
 
 def get_budget_recommendations(config: dict) -> list[str]:
     recommendations: list[str] = []
-    stats = {row["key"]: row for row in get_field_stats(config)}
+    stats = {row["key"]: row for row in get_field_stats(build_workspace_budget_snapshot(config))}
 
     if stats["state"]["chars"] == 0:
         recommendations.append("STATE가 비어 있으면 최근 갈등과 감정선 연결이 약해질 수 있습니다. 짧게라도 현재 상태를 적어두는 편이 좋습니다.")
