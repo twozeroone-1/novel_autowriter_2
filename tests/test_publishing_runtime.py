@@ -468,6 +468,62 @@ class TestPublishingRuntime(unittest.TestCase):
         self.assertEqual(canon_state["timeline"], ["ep_001"])
         self.assertTrue(canon_snapshot_exists)
 
+    def test_tick_applies_canon_update_payload_when_publish_succeeds(self):
+        runtime_cls = self._load_runtime_cls()
+        now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
+        executor = FakePublishingExecutor(
+            result={
+                "platform_results": {
+                    "munpia": {"status": "done", "success": True},
+                },
+                "canon_update": {
+                    "people": {"lead": {"mood": "angry"}},
+                    "resources": {"cash": 2000},
+                    "hooks": ["new hook"],
+                },
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            chapter_path = projects_dir / "sample" / "chapters" / "2화.md"
+            chapter_path.parent.mkdir(parents=True, exist_ok=True)
+            body = "\n".join(f"장면 {index}: 다른 문장입니다." for index in range(80))
+            chapter_path.write_text("# 2화. 확장\n\n" + body, encoding="utf-8")
+
+            with patch("core.publishing_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.chapter_source.DATA_PROJECTS_DIR", projects_dir
+            ), patch("core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.canon_store.DATA_PROJECTS_DIR", projects_dir
+            ):
+                store = PublishingStore(project_name="sample")
+                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                store.save_queue(
+                    [
+                        {
+                            "id": "pub2",
+                            "episode_id": "ep_002",
+                            "chapter_title": "2화. 확장",
+                            "source_path": "chapters/2화.md",
+                            "status": "pending",
+                            "attempt_count": 0,
+                            "targets": {
+                                "munpia": {"selected": True, "status": "pending"},
+                            },
+                        }
+                    ]
+                )
+                runtime = runtime_cls(store=store, executor=executor)
+
+                runtime.tick(now=now)
+
+                canon_state = json.loads((projects_dir / "sample" / "canon" / "current_state.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(canon_state["people"]["lead"]["mood"], "angry")
+        self.assertEqual(canon_state["resources"]["cash"], 2000)
+        self.assertEqual(canon_state["hooks"], ["new hook"])
+        self.assertEqual(canon_state["timeline"], ["ep_002"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -51,6 +51,15 @@ class FakeGenerator:
             "new_summary": "summary text",
         }
 
+    def build_canon_update_candidate(self, chapter_content: str) -> dict:
+        self.calls.append(("build_canon_update_candidate", chapter_content))
+        return {
+            "people": {"lead": {"mood": "angry"}},
+            "resources": {},
+            "hooks": ["new hook"],
+            "timeline": [],
+        }
+
 
 class FakeReviewer:
     def __init__(self):
@@ -108,11 +117,13 @@ class TestAutomator(unittest.TestCase):
         self.assertEqual(result["revised_draft"], "revised draft")
         self.assertEqual(result["new_state"], "state text")
         self.assertEqual(result["new_summary"], "summary text")
-        self.assertEqual(len(messages), 7)
+        self.assertEqual(result["canon_update"]["people"]["lead"]["mood"], "angry")
+        self.assertEqual(len(messages), 8)
         self.assertEqual(generator.calls[0], ("create_chapter", "scene instruction", 3000, False, "balanced"))
         self.assertEqual(reviewer.calls[0], ("review_chapter", "draft text", False, "balanced"))
         self.assertEqual(reviewer.calls[1], ("revise_draft", "draft text", "review report", False, "balanced"))
-        self.assertEqual(generator.calls[-1], ("build_context_suggestions", "revised draft"))
+        self.assertEqual(generator.calls[-2], ("build_context_suggestions", "revised draft"))
+        self.assertEqual(generator.calls[-1], ("build_canon_update_candidate", "revised draft"))
 
     def test_run_single_cycle_passes_plot_options_to_generator(self):
         generator = FakeGenerator()
@@ -154,6 +165,30 @@ class TestAutomator(unittest.TestCase):
         self.assertEqual(result["saved_path"], "/tmp/Episode 1.md")
         self.assertEqual(result["new_state"], "state text")
         self.assertEqual(result["summary_error"], "summary failed")
+        self.assertIn("canon_update", result)
+
+    def test_run_single_cycle_keeps_canon_update_error_without_failing_pipeline(self):
+        generator = FakeGenerator()
+        reviewer = FakeReviewer()
+        automator = Automator(project_name="sample", generator=generator, reviewer=reviewer)
+
+        def build_canon_update_candidate(_: str) -> dict:
+            raise RuntimeError("canon boom")
+
+        generator.build_canon_update_candidate = build_canon_update_candidate  # type: ignore[method-assign]
+
+        result = automator.run_single_cycle(
+            chapter_title="Episode 1",
+            instruction="scene instruction",
+            target_length=1000,
+        )
+
+        self.assertEqual(result["draft"], "draft text")
+        self.assertEqual(result["saved_path"], "/tmp/Episode 1.md")
+        self.assertEqual(result["new_state"], "state text")
+        self.assertEqual(result["new_summary"], "summary text")
+        self.assertEqual(result["canon_update_error"], "canon boom")
+        self.assertNotIn("canon_update", result)
 
     def test_apply_context_updates_delegates_to_generator_context(self):
         generator = FakeGenerator()

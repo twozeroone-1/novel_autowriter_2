@@ -73,6 +73,12 @@ class Automator:
         with progress("다음 회차용 STATE/PREVIOUS SUMMARY 제안을 생성 중입니다..."):
             result.update(self.generator.build_context_suggestions(revised_draft))
 
+        with progress("구조화 Canon 후보를 추출 중입니다..."):
+            try:
+                result["canon_update"] = self.generator.build_canon_update_candidate(revised_draft)
+            except Exception as exc:
+                result["canon_update_error"] = str(exc)
+
         return result
 
     def apply_context_updates(

@@ -3,6 +3,7 @@ from datetime import datetime
 
 from core.app_paths import DATA_PROJECTS_DIR
 from core.automation_scheduler import is_schedule_due
+from core.canon_candidate import is_empty_canon_candidate, normalize_canon_candidate
 from core.canon_store import CanonStore
 from core.chapter_source import load_chapter_source
 from core.origin_quality import validate_origin_draft
@@ -130,6 +131,7 @@ class PublishingRuntime:
         if overall_status == "done":
             episode_id = str(job.get("episode_id", "")).strip()
             if episode_id:
+                canon_update = _build_canon_state_update(job=job, result=result, episode_id=episode_id)
                 self.canon_store.append_event(
                     {
                         "timestamp": now.isoformat(),
@@ -138,7 +140,7 @@ class PublishingRuntime:
                         "chapter_title": job.get("chapter_title", ""),
                     }
                 )
-                canon_state = self.canon_store.apply_state_update({"timeline": [episode_id]})
+                canon_state = self.canon_store.apply_state_update(canon_update)
                 self.canon_store.write_snapshot(episode_id, canon_state)
         self.store.append_history(
             {
@@ -190,6 +192,22 @@ def _summarize_job_status(job: dict) -> str:
     if any(status == "done" for status in selected_statuses):
         return "partial_failed"
     return "failed"
+
+
+def _build_canon_state_update(*, job: dict, result: dict, episode_id: str) -> dict:
+    for source in (result.get("canon_update"), job.get("canon_update")):
+        if not isinstance(source, dict):
+            continue
+        candidate = normalize_canon_candidate(source)
+        if is_empty_canon_candidate(candidate):
+            continue
+        timeline = list(candidate.get("timeline", []))
+        if episode_id not in timeline:
+            timeline.append(episode_id)
+        candidate["timeline"] = timeline
+        return candidate
+
+    return {"timeline": [episode_id]}
 
 
 def run_publishing_pass(*, now: datetime, executor_factory) -> None:

@@ -2,6 +2,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
+from core.canon_extractor import extract_canon_update
 from core.episode_artifact_store import EpisodeArtifactStore
 from core.file_utils import atomic_write_text
 from core.llm import _extract_first_json_value, generate_text
@@ -124,6 +125,9 @@ class Generator:
             suggestions["summary_error"] = str(exc)
 
         return suggestions
+
+    def build_canon_update_candidate(self, chapter_content: str) -> dict:
+        return extract_canon_update(chapter_content, project_name=self.ctx.project_name)
 
     def compress_history_summary(self, long_summary: str) -> str:
         """누적된 과거 줄거리가 너무 길어지면 이를 계층형(시즌 요약 + 최근 전개)으로 초압축합니다."""
