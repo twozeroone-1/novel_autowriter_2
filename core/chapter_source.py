@@ -59,11 +59,13 @@ def _load_episode_artifact_source(project_name: str, episode_id: str | None) -> 
         if not path.exists():
             continue
         content = path.read_text(encoding="utf-8")
+        canon_update = store.load_canon_update(episode_id)
         return {
             "path": path,
             "title": _extract_title(content, path),
             "content": content,
             "episode_id": episode_id,
             "artifact_status": artifact_status,
+            "canon_update": canon_update or {},
         }
     return None

@@ -43,6 +43,23 @@ class TestGeneratorStorage(unittest.TestCase):
                     self.assertTrue(draft_path.exists())
                     self.assertTrue(manifest_path.exists())
 
+    def test_save_markdown_document_does_not_create_episode_artifact_by_default(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)):
+                with patch.object(episode_artifact_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)):
+                    generator = Generator(project_name="sample")
+
+                    filepath = Path(
+                        generator.save_markdown_document(
+                            filename_title="검수리포트",
+                            content="리포트 본문",
+                        )
+                    )
+
+                    self.assertTrue(filepath.exists())
+                    manifest_path = Path(tmpdir) / "sample" / "episodes" / "manifests.json"
+                    self.assertFalse(manifest_path.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -68,14 +68,22 @@ class Automator:
             result["revised_draft"] = revised_draft
 
         with progress("수정본을 저장 중입니다..."):
-            result["saved_path"] = self.generator.save_chapter(chapter_title, revised_draft)
+            saved_bundle = self.generator.save_chapter_bundle(chapter_title, revised_draft)
+            result["saved_path"] = saved_bundle["path"]
+            episode = saved_bundle.get("episode", {}) if isinstance(saved_bundle, dict) else {}
+            episode_id = str(episode.get("episode_id", "")).strip() if isinstance(episode, dict) else ""
+            if episode_id:
+                result["episode_id"] = episode_id
 
         with progress("다음 회차용 STATE/PREVIOUS SUMMARY 제안을 생성 중입니다..."):
             result.update(self.generator.build_context_suggestions(revised_draft))
 
         with progress("구조화 Canon 후보를 추출 중입니다..."):
             try:
-                result["canon_update"] = self.generator.build_canon_update_candidate(revised_draft)
+                canon_update = self.generator.build_canon_update_candidate(revised_draft)
+                result["canon_update"] = canon_update
+                if episode_id:
+                    self.generator.artifact_store.save_canon_update(episode_id, canon_update)
             except Exception as exc:
                 result["canon_update_error"] = str(exc)
 

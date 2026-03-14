@@ -43,10 +43,14 @@ class Generator:
         
     def save_chapter(self, title: str, content: str) -> str:
         """생성된 회차를 마크다운 파일로 저장합니다."""
-        return self.save_markdown_document(
+        return self.save_chapter_bundle(title, content)["path"]
+
+    def save_chapter_bundle(self, title: str, content: str) -> dict:
+        return self._save_markdown_document(
             filename_title=title,
             content=content,
             heading_title=title,
+            persist_episode_artifact=True,
         )
 
     def save_markdown_document(
@@ -56,15 +60,34 @@ class Generator:
         heading_title: str | None = None,
     ) -> str:
         """안전한 파일명으로 마크다운 문서를 저장합니다."""
+        return self._save_markdown_document(
+            filename_title=filename_title,
+            content=content,
+            heading_title=heading_title,
+            persist_episode_artifact=False,
+        )["path"]
+
+    def _save_markdown_document(
+        self,
+        filename_title: str,
+        content: str,
+        heading_title: str | None = None,
+        *,
+        persist_episode_artifact: bool,
+    ) -> dict:
         filepath = self.build_output_path(filename_title, ".md")
         markdown_text = content
         if heading_title:
             markdown_text = f"# {heading_title}\n\n{content}"
         atomic_write_text(filepath, markdown_text)
-        if filepath.suffix == ".md":
+        artifact = None
+        if filepath.suffix == ".md" and persist_episode_artifact:
             artifact_title = heading_title or filename_title
-            self.artifact_store.create_draft(title=artifact_title, content=markdown_text)
-        return str(filepath)
+            artifact = self.artifact_store.create_draft(title=artifact_title, content=markdown_text)
+        return {
+            "path": str(filepath),
+            "artifact": artifact,
+        }
 
     def build_output_path(self, title: str, suffix: str = ".md") -> Path:
         """제목을 안전한 파일명으로 바꿔 중복 없는 출력 경로를 만듭니다."""

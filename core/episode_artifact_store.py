@@ -4,6 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from core.app_paths import DATA_PROJECTS_DIR
+from core.canon_candidate import normalize_canon_candidate
 from core.file_utils import atomic_write_json, atomic_write_text
 
 
@@ -35,6 +36,10 @@ class EpisodeArtifactStore:
     @property
     def published_dir(self) -> Path:
         return self.episodes_dir / "published"
+
+    @property
+    def canon_updates_dir(self) -> Path:
+        return self.episodes_dir / "canon_updates"
 
     def load_manifest(self) -> dict:
         if not self.manifest_path.exists():
@@ -69,6 +74,9 @@ class EpisodeArtifactStore:
             "draft_path": str(draft_path.relative_to(DATA_PROJECTS_DIR / self.project_name)),
             "publishable_path": str((self.publishable_dir / f"{episode_id}.md").relative_to(DATA_PROJECTS_DIR / self.project_name)),
             "published_path": str((self.published_dir / f"{episode_id}.md").relative_to(DATA_PROJECTS_DIR / self.project_name)),
+            "canon_update_path": str(
+                (self.canon_updates_dir / f"{episode_id}.json").relative_to(DATA_PROJECTS_DIR / self.project_name)
+            ),
         }
         self.save_manifest(manifest)
         return deepcopy(episodes[episode_id])
@@ -101,6 +109,22 @@ class EpisodeArtifactStore:
         manifest["episodes"][episode_id]["status"] = "published"
         self.save_manifest(manifest)
         return deepcopy(manifest["episodes"][episode_id])
+
+    def save_canon_update(self, episode_id: str, payload: dict) -> dict:
+        candidate = normalize_canon_candidate(payload)
+        target = self.canon_updates_dir / f"{episode_id}.json"
+        atomic_write_json(target, candidate)
+        return candidate
+
+    def load_canon_update(self, episode_id: str) -> dict | None:
+        target = self.canon_updates_dir / f"{episode_id}.json"
+        if not target.exists():
+            return None
+        try:
+            payload = json.loads(target.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return normalize_canon_candidate(payload)
 
     def _next_sequence(self, episodes: dict) -> int:
         sequences = [int(payload.get("sequence", 0)) for payload in episodes.values() if isinstance(payload, dict)]

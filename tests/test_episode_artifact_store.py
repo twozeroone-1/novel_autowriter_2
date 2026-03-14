@@ -22,6 +22,10 @@ class TestEpisodeArtifactStore(unittest.TestCase):
                 self.assertTrue((store.drafts_dir / "ep_001.md").exists())
                 manifest = store.load_manifest()
                 self.assertEqual(manifest["episodes"]["ep_001"]["title"], "1화. 시작")
+                self.assertEqual(
+                    manifest["episodes"]["ep_001"]["canon_update_path"],
+                    "episodes/canon_updates/ep_001.json",
+                )
 
     def test_promote_draft_to_publishable_copies_expected_artifact(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -59,6 +63,28 @@ class TestEpisodeArtifactStore(unittest.TestCase):
                 self.assertEqual(first["episode_id"], second["episode_id"])
                 self.assertEqual(second["sequence"], 3)
                 self.assertEqual(store.load_manifest()["episodes"]["ep_003"]["title"], "3화. 수정본")
+
+    def test_save_and_load_canon_update_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(episode_artifact_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)):
+                store = EpisodeArtifactStore(project_name="sample")
+                store.create_draft(title="4화. 후보", content="본문", episode_id="ep_004")
+
+                saved = store.save_canon_update(
+                    "ep_004",
+                    {
+                        "people": {"lead": {"mood": "angry"}},
+                        "hooks": ["new hook"],
+                    },
+                )
+                loaded = store.load_canon_update("ep_004")
+
+                self.assertTrue((store.canon_updates_dir / "ep_004.json").exists())
+                self.assertEqual(saved["people"]["lead"]["mood"], "angry")
+                self.assertEqual(loaded["people"]["lead"]["mood"], "angry")
+                self.assertEqual(loaded["resources"], {})
+                self.assertEqual(loaded["hooks"], ["new hook"])
+                self.assertEqual(loaded["timeline"], [])
 
 
 if __name__ == "__main__":

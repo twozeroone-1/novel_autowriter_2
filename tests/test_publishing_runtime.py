@@ -594,6 +594,71 @@ class TestPublishingRuntime(unittest.TestCase):
         self.assertEqual(canon_state["hooks"], ["fresh hook"])
         self.assertEqual(canon_state["timeline"], ["ep_003"])
 
+    def test_tick_prefers_artifact_canon_update_before_extractor_fallback(self):
+        runtime_cls = self._load_runtime_cls()
+        now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
+        executor = FakePublishingExecutor(
+            result={
+                "platform_results": {
+                    "munpia": {"status": "done", "success": True},
+                },
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            chapter_path = projects_dir / "sample" / "chapters" / "6화.md"
+            chapter_path.parent.mkdir(parents=True, exist_ok=True)
+            body = "\n".join(f"장면 {index}: 다른 문장입니다." for index in range(80))
+            chapter_path.write_text("# 6화. 저장 후보\n\n" + body, encoding="utf-8")
+
+            with patch("core.publishing_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.chapter_source.DATA_PROJECTS_DIR", projects_dir
+            ), patch("core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.canon_store.DATA_PROJECTS_DIR", projects_dir
+            ), patch(
+                "core.episode_artifact_store.DATA_PROJECTS_DIR", projects_dir
+            ), patch(
+                "core.publishing_runtime.extract_canon_update",
+                side_effect=AssertionError("extractor should not be called"),
+            ):
+                from core.episode_artifact_store import EpisodeArtifactStore
+
+                store = PublishingStore(project_name="sample")
+                artifact_store = EpisodeArtifactStore(project_name="sample")
+                artifact_store.create_draft(
+                    title="6화. 저장 후보",
+                    content="# 6화. 저장 후보\n\n" + body,
+                    episode_id="ep_006",
+                )
+                artifact_store.promote_to_publishable("ep_006")
+                artifact_store.save_canon_update("ep_006", {"people": {"lead": {"mood": "stored"}}})
+                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                store.save_queue(
+                    [
+                        {
+                            "id": "pub6",
+                            "episode_id": "ep_006",
+                            "chapter_title": "6화. 저장 후보",
+                            "source_path": "chapters/6화.md",
+                            "status": "pending",
+                            "attempt_count": 0,
+                            "targets": {
+                                "munpia": {"selected": True, "status": "pending"},
+                            },
+                        }
+                    ]
+                )
+                runtime = runtime_cls(store=store, executor=executor)
+
+                runtime.tick(now=now)
+
+                canon_state = json.loads((projects_dir / "sample" / "canon" / "current_state.json").read_text(encoding="utf-8"))
+                history = store.load_recent_history(limit=10)
+
+        self.assertEqual(canon_state["people"]["lead"]["mood"], "stored")
+        self.assertEqual(history[0]["canon_update"]["source"], "artifact")
+
     def test_tick_skips_canon_update_when_extractor_fails(self):
         runtime_cls = self._load_runtime_cls()
         now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)

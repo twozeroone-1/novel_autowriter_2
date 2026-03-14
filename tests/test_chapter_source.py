@@ -74,6 +74,27 @@ class TestChapterSource(unittest.TestCase):
         self.assertEqual(payload["episode_id"], "ep_012")
         self.assertEqual(payload["artifact_status"], "publishable")
 
+    def test_load_chapter_source_includes_stored_canon_update_for_episode_artifact(self):
+        module = importlib.import_module("core.chapter_source")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            chapter_path = projects_dir / "sample" / "chapters" / "15화.md"
+            chapter_path.parent.mkdir(parents=True, exist_ok=True)
+            chapter_path.write_text("# 15화. 레거시\n\n레거시 본문", encoding="utf-8")
+
+            with patch.object(module, "DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.episode_artifact_store.DATA_PROJECTS_DIR", projects_dir
+            ):
+                store = EpisodeArtifactStore(project_name="sample")
+                store.create_draft(title="15화. 아티팩트", content="# 15화. 아티팩트\n\n아티팩트 본문", episode_id="ep_015")
+                store.promote_to_publishable("ep_015")
+                store.save_canon_update("ep_015", {"people": {"lead": {"mood": "alert"}}})
+
+                payload = module.load_chapter_source("sample", "chapters/15화.md", episode_id="ep_015")
+
+        self.assertEqual(payload["canon_update"]["people"]["lead"]["mood"], "alert")
+
     def test_load_chapter_source_falls_back_to_legacy_chapter_path_when_artifact_missing(self):
         module = importlib.import_module("core.chapter_source")
 

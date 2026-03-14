@@ -237,6 +237,17 @@ def _build_canon_update_report(
             "error": "",
         }
 
+    source_candidate = source_payload.get("canon_update")
+    if isinstance(source_candidate, dict):
+        candidate = normalize_canon_candidate(source_candidate)
+        if not is_empty_canon_candidate(candidate):
+            return {
+                "status": "applied",
+                "source": "artifact",
+                "candidate": _ensure_episode_timeline(candidate, episode_id),
+                "error": "",
+            }
+
     content = str(source_payload.get("content", "")).strip()
     if not content:
         return {

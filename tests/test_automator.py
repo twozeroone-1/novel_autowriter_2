@@ -25,6 +25,7 @@ class FakeGenerator:
     def __init__(self):
         self.calls = []
         self.ctx = FakeContext()
+        self.artifact_store = FakeArtifactStore()
 
     def create_chapter(
         self,
@@ -43,6 +44,13 @@ class FakeGenerator:
     def save_chapter(self, title: str, content: str) -> str:
         self.calls.append(("save_chapter", title, content))
         return f"/tmp/{title}.md"
+
+    def save_chapter_bundle(self, title: str, content: str) -> dict:
+        self.calls.append(("save_chapter_bundle", title, content))
+        return {
+            "path": f"/tmp/{title}.md",
+            "episode": {"episode_id": "ep_001", "title": title},
+        }
 
     def build_context_suggestions(self, chapter_content: str) -> dict[str, str]:
         self.calls.append(("build_context_suggestions", chapter_content))
@@ -85,6 +93,15 @@ class FakeReviewer:
         return "revised draft"
 
 
+class FakeArtifactStore:
+    def __init__(self):
+        self.saved_updates = []
+
+    def save_canon_update(self, episode_id: str, payload: dict) -> dict:
+        self.saved_updates.append((episode_id, payload))
+        return payload
+
+
 class RecordingStepContext:
     def __init__(self, messages: list[str], message: str):
         self.messages = messages
@@ -122,8 +139,10 @@ class TestAutomator(unittest.TestCase):
         self.assertEqual(generator.calls[0], ("create_chapter", "scene instruction", 3000, False, "balanced"))
         self.assertEqual(reviewer.calls[0], ("review_chapter", "draft text", False, "balanced"))
         self.assertEqual(reviewer.calls[1], ("revise_draft", "draft text", "review report", False, "balanced"))
+        self.assertEqual(generator.calls[-3], ("save_chapter_bundle", "Episode 1", "revised draft"))
         self.assertEqual(generator.calls[-2], ("build_context_suggestions", "revised draft"))
         self.assertEqual(generator.calls[-1], ("build_canon_update_candidate", "revised draft"))
+        self.assertEqual(generator.artifact_store.saved_updates, [("ep_001", result["canon_update"])])
 
     def test_run_single_cycle_passes_plot_options_to_generator(self):
         generator = FakeGenerator()
@@ -189,6 +208,7 @@ class TestAutomator(unittest.TestCase):
         self.assertEqual(result["new_summary"], "summary text")
         self.assertEqual(result["canon_update_error"], "canon boom")
         self.assertNotIn("canon_update", result)
+        self.assertEqual(generator.artifact_store.saved_updates, [])
 
     def test_apply_context_updates_delegates_to_generator_context(self):
         generator = FakeGenerator()
