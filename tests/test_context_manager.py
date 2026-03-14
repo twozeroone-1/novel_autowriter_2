@@ -5,10 +5,12 @@ from unittest.mock import patch
 
 import core.canon_store as canon_store_module
 import core.context as context_module
+import core.plot_store as plot_store_module
 import core.release_policy_store as release_policy_store_module
 import core.story_bible_store as story_bible_store_module
 from core.canon_store import CanonStore
 from core.context import ContextManager
+from core.plot_store import PlotStore
 from core.release_policy_store import ReleasePolicyStore
 from core.story_bible_store import StoryBibleStore
 
@@ -333,6 +335,77 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(config["worldview"], "new world")
                 self.assertEqual(config["tone_and_manner"], "existing style")
                 self.assertEqual(config["continuity"], "existing rules")
+
+    def test_get_plot_outline_prefers_plot_store_over_legacy_config(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                plot_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ):
+                manager = ContextManager(project_name="sample")
+                manager.save_config(
+                    {
+                        **context_module.DEFAULT_CONFIG,
+                        "plot_outline": "legacy plot",
+                        "plot_version": "2",
+                    }
+                )
+                PlotStore(project_name="sample").save(
+                    {
+                        "plot_outline": "stored plot",
+                        "plot_version": "7",
+                    }
+                )
+
+                plot_outline = manager.get_plot_outline()
+
+                self.assertEqual(plot_outline, "stored plot")
+
+    def test_get_plot_outline_falls_back_to_legacy_config_when_plot_store_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                plot_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ):
+                manager = ContextManager(project_name="sample")
+                manager.save_config(
+                    {
+                        **context_module.DEFAULT_CONFIG,
+                        "plot_outline": "legacy plot",
+                        "plot_version": "2",
+                    }
+                )
+
+                plot_outline = manager.get_plot_outline()
+
+                self.assertEqual(plot_outline, "legacy plot")
+
+    def test_save_plot_outline_updates_plot_store_and_legacy_shadow_fields(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                plot_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ):
+                manager = ContextManager(project_name="sample")
+                manager.save_config(
+                    {
+                        **context_module.DEFAULT_CONFIG,
+                        "plot_outline": "legacy plot",
+                        "plot_version": "2",
+                    }
+                )
+
+                with patch.object(manager, "save_config", side_effect=AssertionError("save_config should not be used")):
+                    manager.save_plot_outline("new stored plot")
+
+                plot_payload = PlotStore(project_name="sample").load()
+                legacy_config = manager._load_normalized_config()
+                self.assertEqual(
+                    plot_payload,
+                    {
+                        "plot_outline": "new stored plot",
+                        "plot_version": "3",
+                    },
+                )
+                self.assertEqual(legacy_config["plot_outline"], "new stored plot")
+                self.assertEqual(legacy_config["plot_version"], "3")
 
     def test_save_state_and_previous_summary_update_only_target_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:

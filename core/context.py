@@ -4,6 +4,7 @@ from pathlib import Path
 from core.app_paths import DATA_PROJECTS_DIR
 from core.canon_store import CanonStore
 from core.file_utils import atomic_write_json
+from core.plot_store import PlotStore
 from core.release_policy_store import ReleasePolicyStore
 from core.story_bible_store import DEFAULT_STORY_BIBLE, StoryBibleStore
 
@@ -28,6 +29,7 @@ class ContextManager:
         (self.data_dir / "chapters").mkdir(exist_ok=True)
         self.story_bible_store = StoryBibleStore(project_name=project_name)
         self.canon_store = CanonStore(project_name=project_name)
+        self.plot_store = PlotStore(project_name=project_name)
         self.release_policy_store = ReleasePolicyStore(project_name=project_name)
 
         self.config_path = self.data_dir / "config.json"
@@ -100,6 +102,22 @@ class ContextManager:
 
     def _write_legacy_config(self, config: dict) -> None:
         atomic_write_json(self.config_path, self._normalize_config(config))
+
+    def _load_plot_payload(self) -> dict:
+        if self.plot_store.plot_path.exists():
+            return self.plot_store.load()
+
+        config = self._load_normalized_config()
+        return {
+            "plot_outline": str(config.get("plot_outline", "")),
+            "plot_version": str(config.get("plot_version", "0")),
+        }
+
+    def _write_legacy_plot_shadow(self, payload: dict) -> None:
+        config = self._load_normalized_config()
+        config["plot_outline"] = str(payload.get("plot_outline", ""))
+        config["plot_version"] = str(payload.get("plot_version", "0"))
+        self._write_legacy_config(config)
 
     def _normalize_character(self, raw_char: object) -> dict | None:
         if not isinstance(raw_char, dict):
@@ -320,19 +338,14 @@ class ContextManager:
         )
 
     def get_plot_outline(self) -> str:
-        return self.get_config().get("plot_outline", "").strip()
+        return str(self._load_plot_payload().get("plot_outline", "")).strip()
 
     def save_plot_outline(self, plot_text: str) -> None:
-        config = self.get_config()
-        current_version_raw = config.get("plot_version", "0")
-        try:
-            current_version = int(str(current_version_raw))
-        except (TypeError, ValueError):
-            current_version = 0
+        if not self.plot_store.plot_path.exists():
+            self.plot_store.save(self._load_plot_payload())
 
-        config["plot_outline"] = plot_text.strip()
-        config["plot_version"] = str(current_version + 1)
-        self.save_config(config)
+        payload = self.plot_store.bump_version(plot_text)
+        self._write_legacy_plot_shadow(payload)
 
     def build_plot_block(
         self,
