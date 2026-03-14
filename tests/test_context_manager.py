@@ -35,10 +35,17 @@ class TestContextManager(unittest.TestCase):
                 manager.config_path.write_text('{"worldview": 123, "state": null}', encoding="utf-8")
 
                 config = manager.get_config()
+                workspace_settings = manager.get_workspace_settings()
 
                 self.assertEqual(config["worldview"], "123")
-                self.assertEqual(config["state"], context_module.DEFAULT_CONFIG["state"])
                 self.assertEqual(config["tone_and_manner"], context_module.DEFAULT_CONFIG["tone_and_manner"])
+                self.assertNotIn("state", config)
+                self.assertNotIn("summary_of_previous", config)
+                self.assertEqual(workspace_settings["state"], context_state_store_module.DEFAULT_CONTEXT_STATE["state"])
+                self.assertEqual(
+                    workspace_settings["summary_of_previous"],
+                    context_state_store_module.DEFAULT_CONTEXT_STATE["summary_of_previous"],
+                )
 
     def test_get_characters_skips_invalid_items(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -67,7 +74,7 @@ class TestContextManager(unittest.TestCase):
 
                 manager.update_summary("new summary")
 
-                updated = manager.get_config()["summary_of_previous"]
+                updated = manager.get_workspace_settings()["summary_of_previous"]
                 self.assertIn("existing summary", updated)
                 self.assertIn("new summary", updated)
                 self.assertIn("[진행된 줄거리 요약]", updated)
@@ -90,7 +97,7 @@ class TestContextManager(unittest.TestCase):
                 manager.update_summary("b" * 20, generator_instance=fake_generator)
 
                 self.assertEqual(len(fake_generator.calls), 1)
-                self.assertEqual(manager.get_config()["summary_of_previous"], "compressed summary")
+                self.assertEqual(manager.get_workspace_settings()["summary_of_previous"], "compressed summary")
 
     def test_update_summary_uses_dedicated_summary_save_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -122,7 +129,7 @@ class TestContextManager(unittest.TestCase):
 
                 self.assertIn("existing summary", preview)
                 self.assertIn("new summary", preview)
-                self.assertEqual(manager.get_config()["summary_of_previous"], "existing summary")
+                self.assertEqual(manager.get_workspace_settings()["summary_of_previous"], "existing summary")
 
     def test_apply_context_updates_returns_backup_and_persists_new_values(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -136,13 +143,13 @@ class TestContextManager(unittest.TestCase):
                     summary_of_previous="new summary",
                 )
 
-                config = manager.get_config()
+                workspace_settings = manager.get_workspace_settings()
                 self.assertEqual(result["backup"]["state"], "old state")
                 self.assertEqual(result["backup"]["summary_of_previous"], "old summary")
                 self.assertTrue(result["applied"]["state"])
                 self.assertTrue(result["applied"]["summary_of_previous"])
-                self.assertEqual(config["state"], "new state")
-                self.assertEqual(config["summary_of_previous"], "new summary")
+                self.assertEqual(workspace_settings["state"], "new state")
+                self.assertEqual(workspace_settings["summary_of_previous"], "new summary")
 
     def test_apply_context_updates_only_persists_non_empty_overrides(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -165,7 +172,7 @@ class TestContextManager(unittest.TestCase):
                         summary_of_previous="new summary",
                     )
 
-                config = manager.get_config()
+                workspace_settings = manager.get_workspace_settings()
                 save_state.assert_not_called()
                 save_previous_summary.assert_called_once_with("new summary")
                 self.assertEqual(result["backup"]["state"], "old state")
@@ -174,8 +181,8 @@ class TestContextManager(unittest.TestCase):
                 self.assertTrue(result["applied"]["summary_of_previous"])
                 self.assertEqual(result["current"]["state"], "old state")
                 self.assertEqual(result["current"]["summary_of_previous"], "new summary")
-                self.assertEqual(config["state"], "old state")
-                self.assertEqual(config["summary_of_previous"], "new summary")
+                self.assertEqual(workspace_settings["state"], "old state")
+                self.assertEqual(workspace_settings["summary_of_previous"], "new summary")
 
     def test_get_config_reads_story_bible_fields_from_structured_store(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -198,6 +205,38 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(config["worldview"], "structured world")
                 self.assertEqual(config["tone_and_manner"], "structured style")
                 self.assertEqual(config["continuity"], "structured rules")
+
+    def test_get_config_does_not_expose_state_fields(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                context_state_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ):
+                manager = ContextManager(project_name="sample")
+                manager.save_state("stored state")
+                manager.save_previous_summary("stored summary")
+
+                config = manager.get_config()
+
+                self.assertNotIn("state", config)
+                self.assertNotIn("summary_of_previous", config)
+
+    def test_get_workspace_settings_includes_state_fields_from_context_state_store(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                context_state_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ):
+                manager = ContextManager(project_name="sample")
+                ContextStateStore(project_name="sample").save(
+                    {
+                        "state": "stored state",
+                        "summary_of_previous": "stored summary",
+                    }
+                )
+
+                workspace_settings = manager.get_workspace_settings()
+
+                self.assertEqual(workspace_settings["state"], "stored state")
+                self.assertEqual(workspace_settings["summary_of_previous"], "stored summary")
 
     def test_get_worldview_context_reads_story_bible_without_get_config(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -570,12 +609,15 @@ class TestContextManager(unittest.TestCase):
                 )
 
                 config = manager.get_config()
+                workspace_settings = manager.get_workspace_settings()
                 state_payload = ContextStateStore(project_name="sample").load()
                 legacy_config = json.loads(manager.config_path.read_text(encoding="utf-8"))
 
                 self.assertEqual(config["worldview"], "new world")
-                self.assertEqual(config["state"], "stored state")
-                self.assertEqual(config["summary_of_previous"], "stored summary")
+                self.assertNotIn("state", config)
+                self.assertNotIn("summary_of_previous", config)
+                self.assertEqual(workspace_settings["state"], "stored state")
+                self.assertEqual(workspace_settings["summary_of_previous"], "stored summary")
                 self.assertEqual(state_payload["state"], "stored state")
                 self.assertEqual(state_payload["summary_of_previous"], "stored summary")
                 self.assertEqual(legacy_config["state"], "stored state")
@@ -603,11 +645,8 @@ class TestContextManager(unittest.TestCase):
                 legacy_config = json.loads(manager.config_path.read_text(encoding="utf-8"))
 
                 self.assertFalse(state_store.context_state_path.exists())
-                self.assertEqual(legacy_config["state"], context_module.DEFAULT_CONFIG["state"])
-                self.assertEqual(
-                    legacy_config["summary_of_previous"],
-                    context_module.DEFAULT_CONFIG["summary_of_previous"],
-                )
+                self.assertNotIn("state", legacy_config)
+                self.assertNotIn("summary_of_previous", legacy_config)
 
     def test_save_plot_outline_updates_plot_store_and_legacy_shadow_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -658,10 +697,13 @@ class TestContextManager(unittest.TestCase):
                 manager.save_previous_summary("the hero escaped with the contract")
 
                 config = manager.get_config()
+                workspace_settings = manager.get_workspace_settings()
                 story_bible = StoryBibleStore(project_name="sample").load()
 
-                self.assertEqual(config["state"], "next confrontation is unavoidable")
-                self.assertEqual(config["summary_of_previous"], "the hero escaped with the contract")
+                self.assertNotIn("state", config)
+                self.assertNotIn("summary_of_previous", config)
+                self.assertEqual(workspace_settings["state"], "next confrontation is unavoidable")
+                self.assertEqual(workspace_settings["summary_of_previous"], "the hero escaped with the contract")
                 self.assertEqual(story_bible["worldview"], "fixed world")
                 self.assertEqual(story_bible["style_guide"], "fixed style")
                 self.assertEqual(story_bible["fixed_rules"], "fixed rules")

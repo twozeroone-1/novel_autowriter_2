@@ -3,7 +3,7 @@ from pathlib import Path
 
 from core.app_paths import DATA_PROJECTS_DIR
 from core.canon_store import CanonStore
-from core.context_state_store import ContextStateStore
+from core.context_state_store import DEFAULT_CONTEXT_STATE, ContextStateStore
 from core.file_utils import atomic_write_json
 from core.plot_store import DEFAULT_PLOT, PlotStore
 from core.release_policy_store import ReleasePolicyStore
@@ -15,8 +15,6 @@ DEFAULT_CONFIG = {
     "worldview": "여기에 세계관(STORY_BIBLE)을 작성해 주세요.",
     "tone_and_manner": "여기에 문체(STYLE_GUIDE) 지침을 작성해 주세요.",
     "continuity": "여기에 절대 변경 불가 룰, 연표, 관계도(CONTINUITY)를 작성하세요.",
-    "state": "여기에 현재 회차 떡밥, 갈등 상황, 감정선(STATE)을 작성하세요.",
-    "summary_of_previous": "여기에 지난 줄거리 요약이 누적됩니다.",
 }
 
 
@@ -135,12 +133,14 @@ class ContextManager:
         state: str | None = None,
         summary_of_previous: str | None = None,
     ) -> None:
-        config = self._load_normalized_config()
+        config = self._load_raw_config_payload()
+        if not config:
+            config = DEFAULT_CONFIG.copy()
         if state is not None:
             config["state"] = str(state)
         if summary_of_previous is not None:
             config["summary_of_previous"] = str(summary_of_previous)
-        self._write_legacy_config(config)
+        atomic_write_json(self.config_path, config)
 
     def _get_story_bible_prompt_fields(self) -> dict[str, str]:
         story_bible = self.story_bible_store.load()
@@ -153,19 +153,15 @@ class ContextManager:
     def _get_state_snapshot(self) -> dict[str, str]:
         if self.context_state_store.context_state_path.exists():
             return self.context_state_store.load()
-        config = self._load_normalized_config()
-        return {
-            "state": str(config.get("state", DEFAULT_CONFIG["state"])),
-            "summary_of_previous": str(config.get("summary_of_previous", DEFAULT_CONFIG["summary_of_previous"])),
-        }
-
-    def _merge_state_snapshot_into_config(self, config: dict) -> dict:
-        merged = DEFAULT_CONFIG.copy()
-        merged.update(config)
-        state_snapshot = self._get_state_snapshot()
-        merged["state"] = state_snapshot.get("state", merged["state"])
-        merged["summary_of_previous"] = state_snapshot.get("summary_of_previous", merged["summary_of_previous"])
-        return merged
+        config = self._load_raw_config_payload()
+        snapshot = DEFAULT_CONTEXT_STATE.copy()
+        for key, default_value in DEFAULT_CONTEXT_STATE.items():
+            value = config.get(key, default_value)
+            if value is None:
+                snapshot[key] = default_value
+            else:
+                snapshot[key] = value if isinstance(value, str) else str(value)
+        return snapshot
 
     def _normalize_character(self, raw_char: object) -> dict | None:
         if not isinstance(raw_char, dict):
@@ -258,8 +254,7 @@ class ContextManager:
         return "\n".join(lines)
 
     def get_config(self) -> dict:
-        config = self._merge_story_bible_into_config(self._load_normalized_config())
-        return self._merge_state_snapshot_into_config(config)
+        return self._merge_story_bible_into_config(self._load_normalized_config())
 
     def get_workspace_settings(self) -> dict:
         story_bible_fields = self._get_story_bible_prompt_fields()
@@ -268,8 +263,11 @@ class ContextManager:
             "worldview": story_bible_fields.get("worldview", DEFAULT_CONFIG["worldview"]),
             "tone_and_manner": story_bible_fields.get("tone_and_manner", DEFAULT_CONFIG["tone_and_manner"]),
             "continuity": story_bible_fields.get("continuity", DEFAULT_CONFIG["continuity"]),
-            "state": state_snapshot.get("state", DEFAULT_CONFIG["state"]),
-            "summary_of_previous": state_snapshot.get("summary_of_previous", DEFAULT_CONFIG["summary_of_previous"]),
+            "state": state_snapshot.get("state", DEFAULT_CONTEXT_STATE["state"]),
+            "summary_of_previous": state_snapshot.get(
+                "summary_of_previous",
+                DEFAULT_CONTEXT_STATE["summary_of_previous"],
+            ),
         }
 
     def get_characters(self) -> list[dict]:
