@@ -5,6 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from core.episode_artifact_store import EpisodeArtifactStore
+
 
 class TestChapterSource(unittest.TestCase):
     def test_load_chapter_source_reads_markdown_file(self):
@@ -48,6 +50,48 @@ class TestChapterSource(unittest.TestCase):
                 payload = module.load_chapter_source("sample", "chapters/13화_임시.md")
 
         self.assertEqual(payload["title"], "13화_임시")
+
+    def test_load_chapter_source_prefers_publishable_episode_artifact(self):
+        module = importlib.import_module("core.chapter_source")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            chapter_path = projects_dir / "sample" / "chapters" / "12화.md"
+            chapter_path.parent.mkdir(parents=True, exist_ok=True)
+            chapter_path.write_text("# 12화. 레거시\n\n레거시 본문", encoding="utf-8")
+
+            with patch.object(module, "DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.episode_artifact_store.DATA_PROJECTS_DIR", projects_dir
+            ):
+                store = EpisodeArtifactStore(project_name="sample")
+                store.create_draft(title="12화. 아티팩트", content="# 12화. 아티팩트\n\n아티팩트 본문", episode_id="ep_012")
+                store.promote_to_publishable("ep_012")
+
+                payload = module.load_chapter_source("sample", "chapters/12화.md", episode_id="ep_012")
+
+        self.assertEqual(payload["title"], "12화. 아티팩트")
+        self.assertIn("아티팩트 본문", payload["content"])
+        self.assertEqual(payload["episode_id"], "ep_012")
+        self.assertEqual(payload["artifact_status"], "publishable")
+
+    def test_load_chapter_source_falls_back_to_legacy_chapter_path_when_artifact_missing(self):
+        module = importlib.import_module("core.chapter_source")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            chapter_path = projects_dir / "sample" / "chapters" / "14화.md"
+            chapter_path.parent.mkdir(parents=True, exist_ok=True)
+            chapter_path.write_text("# 14화. 레거시만 존재\n\n레거시 본문", encoding="utf-8")
+
+            with patch.object(module, "DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.episode_artifact_store.DATA_PROJECTS_DIR", projects_dir
+            ):
+                payload = module.load_chapter_source("sample", "chapters/14화.md", episode_id="ep_014")
+
+        self.assertEqual(payload["title"], "14화. 레거시만 존재")
+        self.assertIn("레거시 본문", payload["content"])
+        self.assertEqual(payload["episode_id"], "ep_014")
+        self.assertEqual(payload["artifact_status"], "legacy")
 
 
 if __name__ == "__main__":

@@ -3,7 +3,11 @@ from datetime import datetime
 
 from core.app_paths import DATA_PROJECTS_DIR
 from core.automation_scheduler import is_schedule_due
+from core.canon_store import CanonStore
+from core.chapter_source import load_chapter_source
+from core.origin_quality import validate_origin_draft
 from core.publishing_store import PublishingStore
+from core.run_snapshot_store import RunSnapshotStore
 
 
 DEFAULT_PUBLISHING_RUNTIME_STATE = {
@@ -18,6 +22,8 @@ class PublishingRuntime:
     def __init__(self, store: PublishingStore, executor):
         self.store = store
         self.executor = executor
+        self.snapshot_store = RunSnapshotStore(project_name=store.project_name)
+        self.canon_store = CanonStore(project_name=store.project_name)
 
     def tick(self, now: datetime, *, force: bool = False) -> None:
         config = self.store.load_config()
@@ -44,7 +50,54 @@ class PublishingRuntime:
         self.store.save_queue(queue)
         self.store.save_runtime(runtime)
 
+        run_id = self.snapshot_store.create_run_id(prefix="origin")
+        source_payload = load_chapter_source(
+            self.store.project_name,
+            job.get("source_path", ""),
+            episode_id=str(job.get("episode_id", "")).strip() or None,
+        )
+        self.snapshot_store.write_json_snapshot(
+            run_id,
+            "input_snapshot.json",
+            {
+                "job": deepcopy(job),
+                "source": {
+                    "path": str(source_payload.get("path", "")),
+                    "title": str(source_payload.get("title", "")),
+                    "episode_id": str(source_payload.get("episode_id", "")),
+                    "artifact_status": str(source_payload.get("artifact_status", "")),
+                },
+            },
+        )
+        quality_report = validate_origin_draft(
+            title=str(source_payload.get("title", "")),
+            content=str(source_payload.get("content", "")),
+        )
+        self.snapshot_store.write_json_snapshot(run_id, "quality_report.json", quality_report)
+        if quality_report.get("status") != "passed":
+            last_error = "; ".join(str(item) for item in quality_report.get("errors", []))
+            job["status"] = "failed"
+            job["last_error"] = last_error
+            runtime["status"] = "idle"
+            runtime["current_job_id"] = None
+            runtime["last_run_at"] = now.isoformat()
+            runtime["last_error"] = last_error
+            self.store.save_queue(queue)
+            self.store.save_runtime(runtime)
+            self.store.append_history(
+                {
+                    "timestamp": now.isoformat(),
+                    "job_id": job.get("id"),
+                    "chapter_title": job.get("chapter_title", ""),
+                    "success": False,
+                    "platform_results": {},
+                    "quality_report": quality_report,
+                }
+            )
+            return
+
         result = self.executor.publish_job(job=deepcopy(job), config=deepcopy(config))
+        self.snapshot_store.write_json_snapshot(run_id, "publish_result.json", result)
         platform_results = result.get("platform_results", {})
         platform_config_updates = result.get("platform_config_updates", {})
         self._apply_platform_results(job, platform_results)
@@ -74,6 +127,19 @@ class PublishingRuntime:
         self.store.save_config(config)
         self.store.save_queue(queue)
         self.store.save_runtime(runtime)
+        if overall_status == "done":
+            episode_id = str(job.get("episode_id", "")).strip()
+            if episode_id:
+                self.canon_store.append_event(
+                    {
+                        "timestamp": now.isoformat(),
+                        "episode_id": episode_id,
+                        "kind": "origin_publish_success",
+                        "chapter_title": job.get("chapter_title", ""),
+                    }
+                )
+                canon_state = self.canon_store.apply_state_update({"timeline": [episode_id]})
+                self.canon_store.write_snapshot(episode_id, canon_state)
         self.store.append_history(
             {
                 "timestamp": now.isoformat(),
@@ -81,6 +147,7 @@ class PublishingRuntime:
                 "chapter_title": job.get("chapter_title", ""),
                 "success": overall_status == "done",
                 "platform_results": platform_results,
+                "quality_report": quality_report,
             }
         )
 

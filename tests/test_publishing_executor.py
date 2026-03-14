@@ -23,7 +23,7 @@ class FakeClient:
         return PlatformActionResult(status="done", success=True, work_id=self.created_work_id or "created-work")
 
     def upload_episode(self, request):
-        self.calls.append(("upload_episode", request.work_id, request.episode_title))
+        self.calls.append(("upload_episode", request.work_id, request.episode_title, request.content))
         return PlatformActionResult(
             status="done",
             success=True,
@@ -75,7 +75,7 @@ class TestPublishingExecutor(unittest.TestCase):
 
         self.assertTrue(result["platform_results"]["munpia"]["success"])
         self.assertEqual(result["platform_results"]["munpia"]["work_id"], "work-1")
-        self.assertIn(("upload_episode", "work-1", "Episode 12"), fake_client.calls)
+        self.assertIn(("upload_episode", "work-1", "Episode 12", "# 12화. 계약의 대가\n\n본문"), fake_client.calls)
 
     def test_publish_job_creates_work_when_no_work_id_exists(self):
         from core.publishing_executor import PublishingExecutor
@@ -159,6 +159,55 @@ class TestPublishingExecutor(unittest.TestCase):
 
         self.assertFalse(result["platform_results"]["munpia"]["success"])
         self.assertEqual(result["platform_results"]["munpia"]["error_type"], "requires_user_action")
+
+    def test_publish_job_prefers_episode_artifact_when_episode_id_is_present(self):
+        from core.publishing_executor import PublishingExecutor
+        from core.episode_artifact_store import EpisodeArtifactStore
+
+        fake_client = FakeClient()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            chapter_path = projects_dir / "sample" / "chapters" / "12화.md"
+            chapter_path.parent.mkdir(parents=True, exist_ok=True)
+            chapter_path.write_text("# 12화. 레거시\n\n레거시 본문", encoding="utf-8")
+
+            with patch("core.chapter_source.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.episode_artifact_store.DATA_PROJECTS_DIR", projects_dir
+            ):
+                store = EpisodeArtifactStore(project_name="sample")
+                store.create_draft(title="12화. 아티팩트", content="# 12화. 아티팩트\n\n아티팩트 본문", episode_id="ep_012")
+                store.promote_to_publishable("ep_012")
+
+                executor = PublishingExecutor(
+                    project_name="sample",
+                    credential_loader=lambda project_name, platform_name: {"username": "id", "password": "pw"},
+                    client_factory=lambda **kwargs: fake_client,
+                )
+                result = executor.publish_job(
+                    job={
+                        "chapter_title": "Episode 12",
+                        "source_path": "chapters/12화.md",
+                        "episode_id": "ep_012",
+                        "targets": {
+                            "munpia": {
+                                "selected": True,
+                                "work_id": "work-1",
+                                "episode_title": "Episode 12",
+                            }
+                        },
+                    },
+                    config={
+                        "browser": {"headless": True},
+                        "platforms": {
+                            "munpia": {"enabled": True, "work_id": ""},
+                        },
+                    },
+                )
+
+        self.assertEqual(result["source"]["episode_id"], "ep_012")
+        self.assertEqual(result["source"]["artifact_status"], "publishable")
+        self.assertIn(("upload_episode", "work-1", "Episode 12", "# 12화. 아티팩트\n\n아티팩트 본문"), fake_client.calls)
 
 
 if __name__ == "__main__":

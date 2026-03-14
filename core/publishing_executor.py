@@ -20,7 +20,11 @@ class PublishingExecutor:
         self.client_factory = client_factory or self._default_client_factory
 
     def publish_job(self, *, job: dict, config: dict) -> dict:
-        source_payload = load_chapter_source(self.project_name, job.get("source_path", ""))
+        source_payload = load_chapter_source(
+            self.project_name,
+            job.get("source_path", ""),
+            episode_id=str(job.get("episode_id", "")).strip() or None,
+        )
         platform_results: dict[str, dict] = {}
         platform_config_updates: dict[str, dict] = {}
 
