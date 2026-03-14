@@ -222,6 +222,66 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(config["tone_and_manner"], "structured style")
                 self.assertEqual(config["continuity"], "structured rules")
 
+    def test_get_worldview_context_reads_story_bible_without_get_config(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ):
+                manager = ContextManager(project_name="sample")
+                manager.save_story_bible_sections(
+                    worldview="structured world",
+                    tone_and_manner="structured style",
+                    continuity="structured rules",
+                )
+
+                with patch.object(manager, "get_config", side_effect=AssertionError("get_config should not be used")):
+                    context_text = manager.get_worldview_context()
+
+                self.assertIn("structured world", context_text)
+                self.assertIn("structured style", context_text)
+
+    def test_get_continuity_context_reads_story_bible_without_get_config(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ):
+                manager = ContextManager(project_name="sample")
+                manager.save_story_bible_sections(
+                    worldview="structured world",
+                    tone_and_manner="structured style",
+                    continuity="structured rules",
+                )
+
+                with patch.object(manager, "get_config", side_effect=AssertionError("get_config should not be used")):
+                    context_text = manager.get_continuity_context()
+
+                self.assertIn("structured rules", context_text)
+
+    def test_get_state_context_reads_state_snapshot_without_get_config(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)):
+                manager = ContextManager(project_name="sample")
+                manager.save_state("current state")
+                manager.save_previous_summary("previous summary")
+
+                with patch.object(manager, "get_config", side_effect=AssertionError("get_config should not be used")):
+                    context_text = manager.get_state_context()
+
+                self.assertIn("current state", context_text)
+                self.assertIn("previous summary", context_text)
+
+    def test_build_updated_summary_text_reads_existing_summary_without_get_config(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)):
+                manager = ContextManager(project_name="sample")
+                manager.save_previous_summary("existing summary")
+
+                with patch.object(manager, "get_config", side_effect=AssertionError("get_config should not be used")):
+                    preview = manager.build_updated_summary_text("new summary")
+
+                self.assertIn("existing summary", preview)
+                self.assertIn("new summary", preview)
+
     def test_save_config_updates_story_bible_store_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(

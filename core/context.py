@@ -127,6 +127,21 @@ class ContextManager:
         config["plot_version"] = str(payload.get("plot_version", "0"))
         atomic_write_json(self.config_path, config)
 
+    def _get_story_bible_prompt_fields(self) -> dict[str, str]:
+        story_bible = self.story_bible_store.load()
+        return {
+            "worldview": str(story_bible.get("worldview", DEFAULT_STORY_BIBLE["worldview"])),
+            "tone_and_manner": str(story_bible.get("style_guide", DEFAULT_STORY_BIBLE["style_guide"])),
+            "continuity": str(story_bible.get("fixed_rules", DEFAULT_STORY_BIBLE["fixed_rules"])),
+        }
+
+    def _get_state_snapshot(self) -> dict[str, str]:
+        config = self._load_normalized_config()
+        return {
+            "state": str(config.get("state", DEFAULT_CONFIG["state"])),
+            "summary_of_previous": str(config.get("summary_of_previous", DEFAULT_CONFIG["summary_of_previous"])),
+        }
+
     def _normalize_character(self, raw_char: object) -> dict | None:
         if not isinstance(raw_char, dict):
             return None
@@ -167,9 +182,9 @@ class ContextManager:
         return normalized
 
     def get_worldview_context(self) -> str:
-        config = self.get_config()
-        worldview = config.get("worldview", "")
-        tone = config.get("tone_and_manner", "")
+        prompt_fields = self._get_story_bible_prompt_fields()
+        worldview = prompt_fields.get("worldview", "")
+        tone = prompt_fields.get("tone_and_manner", "")
         return f"""[STORY BIBLE] (세계관 및 기본 설정)
 {worldview}
 
@@ -178,7 +193,7 @@ class ContextManager:
 """
 
     def get_continuity_context(self) -> str:
-        continuity = self.get_config().get("continuity", "")
+        continuity = self._get_story_bible_prompt_fields().get("continuity", "")
         return f"""[CONTINUITY] (고정 설정, 절대 바뀌면 안 되는 규칙)
 {continuity}
 """
@@ -196,9 +211,9 @@ class ContextManager:
 """
 
     def get_state_context(self) -> str:
-        config = self.get_config()
-        state_info = config.get("state", "")
-        prev_summary = config.get("summary_of_previous", "")
+        state_snapshot = self._get_state_snapshot()
+        state_info = state_snapshot.get("state", "")
+        prev_summary = state_snapshot.get("summary_of_previous", "")
         return f"""[STATE] (현재 회차 상태, 갈등, 감정선)
 {state_info}
 
@@ -284,7 +299,7 @@ class ContextManager:
         atomic_write_json(self.chars_path, normalized_chars)
 
     def build_updated_summary_text(self, new_summary: str, generator_instance=None) -> str:
-        old_summary = self.get_config().get("summary_of_previous", "").strip()
+        old_summary = self._get_state_snapshot().get("summary_of_previous", "").strip()
         if old_summary:
             updated_summary = old_summary + "\n\n[진행된 줄거리 요약]\n" + new_summary
         else:
