@@ -536,7 +536,7 @@ def render_automation_tab(app) -> None:
 
     st.divider()
     st.subheader("4-5. 진단 상세")
-    render_diagnostics_panel(app.generator.ctx.project_name)
+    render_diagnostics_panel(app.generator.ctx.project_name, key_prefix="automation_diag")
 
 
 def _parse_time_value(raw_time: str) -> dt_time:

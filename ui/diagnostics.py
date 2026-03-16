@@ -128,21 +128,49 @@ def get_sidebar_summary(project_name: str) -> dict:
     return build_recent_summary(load_recent_llm_runs(project_name))
 
 
-def render_detail_fields(row: dict, *, index: int) -> None:
-    st.text_area("프롬프트", value=row.get("prompt_text", ""), height=160, key=f"diag_prompt_{index}", disabled=True)
-    st.text_area("응답", value=row.get("response_text", ""), height=160, key=f"diag_response_{index}", disabled=True)
-    st.text_area("stderr", value=row.get("stderr_text", ""), height=100, key=f"diag_stderr_{index}", disabled=True)
-    st.text_area("오류", value=row.get("error_text", ""), height=100, key=f"diag_error_{index}", disabled=True)
+def _panel_key(key_prefix: str, suffix: str) -> str:
+    return f"{key_prefix}_{suffix}"
+
+
+def render_detail_fields(row: dict, *, index: int, key_prefix: str = "diag") -> None:
+    st.text_area(
+        "프롬프트",
+        value=row.get("prompt_text", ""),
+        height=160,
+        key=_panel_key(key_prefix, f"prompt_{index}"),
+        disabled=True,
+    )
+    st.text_area(
+        "응답",
+        value=row.get("response_text", ""),
+        height=160,
+        key=_panel_key(key_prefix, f"response_{index}"),
+        disabled=True,
+    )
+    st.text_area(
+        "stderr",
+        value=row.get("stderr_text", ""),
+        height=100,
+        key=_panel_key(key_prefix, f"stderr_{index}"),
+        disabled=True,
+    )
+    st.text_area(
+        "오류",
+        value=row.get("error_text", ""),
+        height=100,
+        key=_panel_key(key_prefix, f"error_{index}"),
+        disabled=True,
+    )
     st.text_area(
         "fallback 메모",
         value=row.get("fallback_note", ""),
         height=80,
-        key=f"diag_fallback_{index}",
+        key=_panel_key(key_prefix, f"fallback_{index}"),
         disabled=True,
     )
 
 
-def render_diagnostics_panel(project_name: str) -> None:
+def render_diagnostics_panel(project_name: str, *, key_prefix: str = "diag") -> None:
     records = load_recent_llm_runs(project_name)
     summary = build_recent_summary(records)
     automation_history = AutomationStore(project_name=project_name).load_recent_history(limit=10)
@@ -154,25 +182,25 @@ def render_diagnostics_panel(project_name: str) -> None:
         success_filter = st.selectbox(
             "결과",
             ["all", "success", "failed"],
-            key="diag_success_filter",
+            key=_panel_key(key_prefix, "success_filter"),
             format_func=lambda item: RESULT_FILTER_LABELS[item],
         )
         requested_backend = st.selectbox(
             "요청 백엔드",
             ["all"] + sorted({record.get("requested_backend") for record in records if record.get("requested_backend")}),
-            key="diag_requested_backend",
+            key=_panel_key(key_prefix, "requested_backend"),
             format_func=lambda item: "전체" if item == "all" else item,
         )
         actual_backend = st.selectbox(
             "실제 백엔드",
             ["all"] + sorted({record.get("actual_backend") for record in records if record.get("actual_backend")}),
-            key="diag_actual_backend",
+            key=_panel_key(key_prefix, "actual_backend"),
             format_func=lambda item: "전체" if item == "all" else item,
         )
         model_name = st.selectbox(
             "모델",
             ["all"] + sorted({record.get("model") for record in records if record.get("model")}),
-            key="diag_model_name",
+            key=_panel_key(key_prefix, "model_name"),
             format_func=lambda item: "전체" if item == "all" else item,
         )
 
@@ -198,7 +226,7 @@ def render_diagnostics_panel(project_name: str) -> None:
                 f" | {row.get('duration_ms', 0)} ms"
             )
             with st.expander(label, expanded=False):
-                render_detail_fields(row, index=index)
+                render_detail_fields(row, index=index, key_prefix=key_prefix)
 
         st.divider()
         st.caption("자동화 연재 실행 기록")

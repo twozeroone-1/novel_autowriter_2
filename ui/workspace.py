@@ -927,4 +927,4 @@ def render_project_settings_tab(
     st.divider()
     render_character_management_panel(generator, config)
     st.divider()
-    render_diagnostics_panel(generator.ctx.project_name)
+    render_diagnostics_panel(generator.ctx.project_name, key_prefix="workspace_diag")

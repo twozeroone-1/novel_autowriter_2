@@ -3,6 +3,7 @@ import importlib.util
 import sys
 import types
 import unittest
+from contextlib import nullcontext
 from unittest.mock import patch
 
 
@@ -114,6 +115,36 @@ class TestDiagnosticsUi(unittest.TestCase):
         labels = [call.args[0] for call in mocked_text_area.call_args_list]
         self.assertEqual(labels, ["프롬프트", "응답", "stderr", "오류", "fallback 메모"])
         self.assertTrue(all(call.kwargs["disabled"] for call in mocked_text_area.call_args_list))
+
+    def test_render_diagnostics_panel_prefixes_widget_keys(self):
+        diagnostics_ui = self._load_module()
+
+        with (
+            patch.object(diagnostics_ui, "load_recent_llm_runs", return_value=[]),
+            patch.object(diagnostics_ui, "build_recent_summary", return_value={"run_count": 0, "failure_count": 0, "latest_backend": ""}),
+            patch.object(diagnostics_ui, "build_detail_rows", return_value=[]),
+            patch.object(diagnostics_ui, "build_automation_history_rows", return_value=[]),
+            patch.object(diagnostics_ui.st, "expander", side_effect=lambda *args, **kwargs: nullcontext()),
+            patch.object(diagnostics_ui.st, "selectbox", return_value="all") as mocked_selectbox,
+            patch.object(diagnostics_ui.st, "caption"),
+            patch.object(diagnostics_ui.st, "warning"),
+            patch.object(diagnostics_ui.st, "divider"),
+            patch.object(diagnostics_ui.st, "dataframe"),
+        ):
+            with patch.object(diagnostics_ui, "AutomationStore") as mocked_store:
+                mocked_store.return_value.load_recent_history.return_value = []
+                diagnostics_ui.render_diagnostics_panel("demo", key_prefix="automation_diag")
+
+        observed_keys = [call.kwargs["key"] for call in mocked_selectbox.call_args_list]
+        self.assertEqual(
+            observed_keys,
+            [
+                "automation_diag_success_filter",
+                "automation_diag_requested_backend",
+                "automation_diag_actual_backend",
+                "automation_diag_model_name",
+            ],
+        )
 
 
     def test_build_automation_history_rows_formats_execution_metadata(self):
