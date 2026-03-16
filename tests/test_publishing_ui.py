@@ -251,6 +251,77 @@ class TestPublishingUi(unittest.TestCase):
 
         self.assertEqual(unsupported, [])
 
+    def test_build_platform_readiness_rows_marks_missing_credentials_and_mapping(self):
+        module = self._load_module()
+
+        rows = module.build_platform_readiness_rows(
+            project_name="sample",
+            config={
+                "platforms": {
+                    "munpia": {
+                        "enabled": True,
+                        "work_id": "",
+                        "upload_url_template": "",
+                    }
+                }
+            },
+            credential_loader=lambda _project, _platform: {"username": "", "password": ""},
+        )
+
+        self.assertEqual(rows[0]["platform_name"], "munpia")
+        self.assertFalse(rows[0]["ready"])
+        self.assertFalse(rows[0]["has_credentials"])
+        self.assertFalse(rows[0]["has_work_id"])
+        self.assertFalse(rows[0]["has_upload_url_template"])
+
+    def test_build_platform_readiness_rows_marks_ready_platform(self):
+        module = self._load_module()
+
+        rows = module.build_platform_readiness_rows(
+            project_name="sample",
+            config={
+                "platforms": {
+                    "novelpia": {
+                        "enabled": True,
+                        "work_id": "416704",
+                        "upload_url_template": "https://example.test/upload/{work_id}",
+                    }
+                }
+            },
+            credential_loader=lambda _project, _platform: {"username": "writer", "password": "secret"},
+        )
+
+        self.assertEqual(rows[1]["platform_name"], "novelpia")
+        self.assertTrue(rows[1]["ready"])
+        self.assertTrue(rows[1]["has_credentials"])
+        self.assertTrue(rows[1]["has_work_id"])
+        self.assertTrue(rows[1]["has_upload_url_template"])
+
+    def test_build_publishing_operations_snapshot_prioritizes_configuration_action_when_platform_not_ready(self):
+        module = self._load_module()
+
+        snapshot = module.build_publishing_operations_snapshot(
+            project_name="sample",
+            config={
+                "enabled": True,
+                "schedule": {"type": "daily", "time": "21:00"},
+                "platforms": {
+                    "munpia": {
+                        "enabled": True,
+                        "work_id": "",
+                        "upload_url_template": "",
+                    }
+                },
+            },
+            runtime={"status": "idle", "last_error": ""},
+            queue=[{"status": "pending"}],
+            history=[],
+            credential_loader=lambda _project, _platform: {"username": "", "password": ""},
+        )
+
+        self.assertFalse(snapshot["publishing_ready"])
+        self.assertEqual(snapshot["next_actions"][0], "플랫폼 계정과 작품 매핑을 먼저 완료하세요.")
+
 
 if __name__ == "__main__":
     unittest.main()

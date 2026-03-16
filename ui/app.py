@@ -145,7 +145,7 @@ PROJECT_TAB_LABELS = (
     "[3] 원고 검수",
     "[4] 반자동 연재 모드",
     "[5] 자동화 연재 모드",
-    "[6] 외부 플랫폼 업로드",
+    "발행 운영",
 )
 PROJECT_SETTINGS_SUBSECTION_LABELS = (
     "기본 설정",

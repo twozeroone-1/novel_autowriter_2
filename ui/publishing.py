@@ -127,6 +127,91 @@ def count_pending_publishing_jobs(queue: list[dict]) -> int:
     return sum(1 for job in queue if job.get("status") in {"pending", "partial_failed", "scheduled"})
 
 
+def build_platform_readiness_rows(
+    *,
+    project_name: str,
+    config: dict,
+    credential_loader=load_platform_credentials,
+) -> list[dict]:
+    rows: list[dict] = []
+    for platform_name in PLATFORM_OPTIONS:
+        platform_config = config.get("platforms", {}).get(platform_name, {})
+        enabled = bool(platform_config.get("enabled", False))
+        credentials = credential_loader(project_name, platform_name) if enabled else {}
+        has_credentials = bool(
+            str(credentials.get("username", "")).strip() and str(credentials.get("password", "")).strip()
+        )
+        has_work_id = bool(str(platform_config.get("work_id", "")).strip())
+        has_upload_url_template = bool(str(platform_config.get("upload_url_template", "")).strip())
+        rows.append(
+            {
+                "platform_name": platform_name,
+                "platform_label": PLATFORM_LABELS[platform_name],
+                "enabled": enabled,
+                "has_credentials": has_credentials,
+                "has_work_id": has_work_id,
+                "has_upload_url_template": has_upload_url_template,
+                "ready": enabled and has_credentials and has_work_id and has_upload_url_template,
+            }
+        )
+    return rows
+
+
+def build_publishing_operations_snapshot(
+    *,
+    project_name: str,
+    config: dict,
+    runtime: dict,
+    queue: list[dict],
+    history: list[dict],
+    credential_loader=load_platform_credentials,
+) -> dict:
+    platform_rows = build_platform_readiness_rows(
+        project_name=project_name,
+        config=config,
+        credential_loader=credential_loader,
+    )
+    enabled_rows = [row for row in platform_rows if row["enabled"]]
+    ready_rows = [row for row in enabled_rows if row["ready"]]
+    blockers: list[str] = []
+
+    if not enabled_rows:
+        blockers.append("활성화된 업로드 플랫폼이 없습니다.")
+    if any(row["enabled"] and not row["has_credentials"] for row in platform_rows):
+        blockers.append("플랫폼 계정이 비어 있습니다.")
+    if any(row["enabled"] and not row["has_work_id"] for row in platform_rows):
+        blockers.append("work_id가 비어 있는 플랫폼이 있습니다.")
+    if any(row["enabled"] and not row["has_upload_url_template"] for row in platform_rows):
+        blockers.append("업로드 URL 템플릿이 비어 있는 플랫폼이 있습니다.")
+
+    runtime_status = format_publishing_runtime_status(runtime)
+    runtime_state = str(runtime.get("status", "idle")).strip().lower() or "idle"
+    if runtime_state in {"blocked", "paused", "stopped"}:
+        blockers.append(f"런타임 상태를 확인하세요: {runtime_status}")
+
+    publishing_ready = bool(enabled_rows) and len(ready_rows) == len(enabled_rows)
+    next_actions = _build_publishing_operations_actions(
+        publishing_ready=publishing_ready,
+        runtime_state=runtime_state,
+        pending_job_count=count_pending_publishing_jobs(queue),
+    )
+
+    return {
+        "platform_rows": platform_rows,
+        "publishing_ready": publishing_ready,
+        "enabled_platform_count": len(enabled_rows),
+        "ready_platform_count": len(ready_rows),
+        "pending_job_count": count_pending_publishing_jobs(queue),
+        "runtime_status": runtime_status,
+        "schedule_summary": format_publishing_schedule_summary(config),
+        "queue_rows": build_publishing_queue_rows(queue)[:5],
+        "history_rows": build_publishing_history_rows(history)[:5],
+        "history_summary": build_publishing_history_summary(history),
+        "blockers": tuple(blockers),
+        "next_actions": tuple(next_actions),
+    }
+
+
 def build_publishing_queue_rows(queue: list[dict]) -> list[dict]:
     rows: list[dict] = []
     for index, job in enumerate(queue, start=1):
@@ -208,34 +293,111 @@ def render_publishing_tab(app) -> None:
     queue = store.load_queue()
     runtime = store.load_runtime()
     history = store.load_recent_history(limit=10)
+    snapshot = build_publishing_operations_snapshot(
+        project_name=project_name,
+        config=config,
+        runtime=runtime,
+        queue=queue,
+        history=history,
+    )
 
-    st.header("[6] 외부 플랫폼 업로드")
-    st.caption("문피아/노벨피아 계정과 작품 매핑을 관리하고, 로컬 회차 파일을 예약 업로드합니다.")
+    st.header("발행 운영")
+    st.caption("플랫폼 준비 상태, 업로드 큐, 런타임 상황을 먼저 확인하고 필요한 설정은 아래에서 수정합니다.")
 
-    summary_col1, summary_col2, summary_col3 = st.columns(3)
+    summary_col1, summary_col2, summary_col3, summary_col4 = st.columns(4)
     with summary_col1:
-        st.metric("업로드 스케줄", format_publishing_schedule_summary(config))
+        st.metric("업로드 스케줄", snapshot["schedule_summary"])
     with summary_col2:
-        st.metric("현재 상태", format_publishing_runtime_status(runtime))
+        st.metric("현재 상태", snapshot["runtime_status"])
     with summary_col3:
-        st.metric("대기 작업", str(count_pending_publishing_jobs(queue)))
+        st.metric("플랫폼 준비도", f"{snapshot['ready_platform_count']}/{snapshot['enabled_platform_count']}")
+    with summary_col4:
+        st.metric("대기 작업", str(snapshot["pending_job_count"]))
 
     st.divider()
-    st.subheader("1. 플랫폼 계정/작품 설정")
+    st.subheader("1. 플랫폼 준비 상태")
+    readiness_columns = st.columns(len(snapshot["platform_rows"]))
+    for column, row in zip(readiness_columns, snapshot["platform_rows"]):
+        with column:
+            st.markdown(f"**{row['platform_label']}**")
+            if not row["enabled"]:
+                st.caption("비활성")
+                continue
+            st.caption("준비 완료" if row["ready"] else "추가 설정 필요")
+            st.markdown(f"- 계정: {'연결됨' if row['has_credentials'] else '없음'}")
+            st.markdown(f"- work_id: {'있음' if row['has_work_id'] else '없음'}")
+            st.markdown(f"- 업로드 URL: {'있음' if row['has_upload_url_template'] else '없음'}")
+
+    st.divider()
+    st.subheader("2. 큐 / 최근 이력 요약")
+    queue_col, history_col = st.columns(2)
+    with queue_col:
+        st.caption("업로드 큐")
+        if snapshot["queue_rows"]:
+            st.dataframe(snapshot["queue_rows"], use_container_width=True, hide_index=True)
+        else:
+            st.info("대기 중인 업로드 작업이 없습니다.")
+
+    with history_col:
+        st.caption("최근 이력")
+        history_summary = snapshot["history_summary"]
+        st.write(
+            f"총 {history_summary['total']}건 / 성공 {history_summary['success']}건 / 실패 {history_summary['failure']}건"
+        )
+        if snapshot["history_rows"]:
+            st.dataframe(snapshot["history_rows"], use_container_width=True, hide_index=True)
+        else:
+            st.info("최근 업로드 이력이 없습니다.")
+
+    st.divider()
+    st.subheader("3. 주요 경고 / 다음 작업")
+    if snapshot["blockers"]:
+        for blocker in snapshot["blockers"]:
+            st.markdown(f"- {blocker}")
+    else:
+        st.info("현재 확인된 발행 차단 사유가 없습니다.")
+    for action in snapshot["next_actions"]:
+        st.markdown(f"- {action}")
+
+    st.divider()
+    st.subheader("4. 고급 설정")
+    st.caption("실제 계정/작품 설정, 스케줄 편집, 큐 편집, 상세 런타임 제어는 아래에서 계속 조정할 수 있습니다.")
+
+    st.subheader("4-1. 플랫폼 계정/작품 설정")
     for platform_name in PLATFORM_OPTIONS:
         _render_platform_settings(project_name, store, config, platform_name)
 
     st.divider()
-    st.subheader("2. 업로드 스케줄 설정")
+    st.subheader("4-2. 업로드 스케줄 설정")
     _render_schedule_settings(store, config)
 
     st.divider()
-    st.subheader("3. 업로드 큐")
+    st.subheader("4-3. 업로드 큐 편집")
     _render_queue_editor(app, store, config, queue)
 
     st.divider()
-    st.subheader("4. 실행 상태와 이력")
+    st.subheader("4-4. 실행 상태와 이력 상세")
     _render_runtime_and_history(project_name, store, runtime, history)
+
+
+def _build_publishing_operations_actions(
+    *,
+    publishing_ready: bool,
+    runtime_state: str,
+    pending_job_count: int,
+) -> list[str]:
+    actions: list[str] = []
+    if not publishing_ready:
+        actions.append("플랫폼 계정과 작품 매핑을 먼저 완료하세요.")
+    elif pending_job_count <= 0:
+        actions.append("업로드 큐에 발행할 회차를 추가하세요.")
+    else:
+        actions.append("업로드 큐와 런타임 상태를 확인하세요.")
+
+    if runtime_state in {"blocked", "paused", "stopped"}:
+        actions.append("마지막 오류를 확인하고 필요하면 수동 개입을 진행하세요.")
+
+    return actions
 
 
 def _render_platform_settings(project_name: str, store: PublishingStore, config: dict, platform_name: str) -> None:
