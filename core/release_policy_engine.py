@@ -52,6 +52,7 @@ def evaluate_release_policy(
             platform_name=str(platform_name),
             platform_policy=platform_policy if isinstance(platform_policy, dict) else {},
             success_count=platform_counts.get(str(platform_name), 0),
+            now=now,
         )
         if allowed:
             allowed_platforms.append(str(platform_name))
@@ -127,9 +128,19 @@ def _collect_platform_incident_blocks(*, history: list[dict], threshold: int) ->
     return blocked
 
 
-def _platform_is_allowed_now(*, policy: dict, platform_name: str, platform_policy: dict, success_count: int) -> tuple[bool, str, bool]:
+def _platform_is_allowed_now(
+    *,
+    policy: dict,
+    platform_name: str,
+    platform_policy: dict,
+    success_count: int,
+    now: datetime,
+) -> tuple[bool, str, bool]:
     if not platform_policy.get("enabled", False):
         return False, "platform_disabled", False
+
+    if not _matches_platform_time_window(platform_policy=platform_policy, now=now):
+        return False, "outside_release_window", False
 
     requested_cap = max(1, int(platform_policy.get("max_daily_releases", 1) or 1))
     burst_allowed = bool((policy.get("global") or {}).get("burst_allowed", False))
@@ -146,6 +157,18 @@ def _platform_is_allowed_now(*, policy: dict, platform_name: str, platform_polic
 
 def _is_second_slot_open(*, burst_allowed: bool, requested_cap: int, success_count: int) -> bool:
     return burst_allowed and requested_cap >= 2 and success_count >= 1
+
+
+def _matches_platform_time_window(*, platform_policy: dict, now: datetime) -> bool:
+    raw_times = platform_policy.get("default_times", [])
+    if isinstance(raw_times, str):
+        raw_times = [raw_times]
+    if not isinstance(raw_times, list):
+        return True
+    normalized_times = [str(value).strip() for value in raw_times if str(value).strip()]
+    if not normalized_times:
+        return True
+    return now.strftime("%H:%M") in normalized_times
 
 
 def _skip_decision(

@@ -169,6 +169,61 @@ class TestReleasePolicyEngine(unittest.TestCase):
         self.assertEqual(decision["reason"], "no_allowed_platforms")
         self.assertEqual(decision["blocked_platforms"]["munpia"], "daily_limit_reached")
 
+    def test_evaluate_release_policy_allows_only_platforms_matching_current_time_window(self):
+        decision = evaluate_release_policy(
+            policy={
+                "global": {"burst_allowed": False},
+                "platforms": {
+                    "munpia": {
+                        "enabled": True,
+                        "max_daily_releases": 1,
+                        "default_times": ["21:00"],
+                    },
+                    "novelpia": {
+                        "enabled": True,
+                        "max_daily_releases": 1,
+                        "default_times": ["20:00"],
+                    },
+                },
+            },
+            runtime={"status": "idle", "last_run_at": None},
+            history=[],
+            now=datetime(2026, 3, 16, 21, 0, tzinfo=timezone.utc),
+            force=False,
+        )
+
+        self.assertEqual(decision["action"], "run_now")
+        self.assertEqual(decision["allowed_platforms"], ["munpia"])
+        self.assertEqual(decision["blocked_platforms"]["novelpia"], "outside_release_window")
+
+    def test_evaluate_release_policy_skips_when_no_platform_matches_time_window(self):
+        decision = evaluate_release_policy(
+            policy={
+                "global": {"burst_allowed": False},
+                "platforms": {
+                    "munpia": {
+                        "enabled": True,
+                        "max_daily_releases": 1,
+                        "default_times": ["07:00"],
+                    },
+                    "novelpia": {
+                        "enabled": True,
+                        "max_daily_releases": 1,
+                        "default_times": ["20:00"],
+                    },
+                },
+            },
+            runtime={"status": "idle", "last_run_at": None},
+            history=[],
+            now=datetime(2026, 3, 16, 21, 0, tzinfo=timezone.utc),
+            force=False,
+        )
+
+        self.assertEqual(decision["action"], "skip")
+        self.assertEqual(decision["reason"], "no_allowed_platforms")
+        self.assertEqual(decision["blocked_platforms"]["munpia"], "outside_release_window")
+        self.assertEqual(decision["blocked_platforms"]["novelpia"], "outside_release_window")
+
     def test_evaluate_release_policy_blocks_only_platform_with_repeated_platform_incidents(self):
         history = [
             {
