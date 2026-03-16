@@ -8,6 +8,7 @@ from core.context_prompt_sections import (
     build_canon_context,
     build_character_context,
     build_continuity_context,
+    build_episode_plan_block,
     build_generation_prompt as build_prompt_text,
     build_plot_block as build_plot_text,
     build_release_policy_context,
@@ -353,6 +354,7 @@ class ContextManager:
         length_goal: int = 5000,
         include_plot: bool = False,
         plot_strength: str = "balanced",
+        episode_plan: dict | None = None,
     ) -> str:
         world_ctx = self.get_worldview_context()
         char_ctx = self.get_character_context()
@@ -361,6 +363,7 @@ class ContextManager:
         release_policy_ctx = self.get_release_policy_context()
         state_ctx = self.get_state_context()
         plot_block = self.build_plot_block(include_plot=include_plot, plot_strength=plot_strength)
+        episode_plan_block = build_episode_plan_block(episode_plan)
         return build_prompt_text(
             worldview_context=world_ctx,
             continuity_context=continuity_ctx,
@@ -369,6 +372,7 @@ class ContextManager:
             state_context=state_ctx,
             character_context=char_ctx,
             plot_block=plot_block,
+            episode_plan_block=episode_plan_block,
             user_instruction=user_instruction,
             length_goal=length_goal,
         )

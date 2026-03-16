@@ -3,6 +3,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 from core.canon_extractor import extract_canon_update
+from core.episode_planner import EpisodePlanner
 from core.episode_artifact_store import EpisodeArtifactStore
 from core.file_utils import atomic_write_text
 from core.llm import _extract_first_json_value, generate_text
@@ -12,6 +13,7 @@ class Generator:
     def __init__(self, project_name: str = "default_project"):
         # ContextManager에 project_name 주입
         self.ctx = ContextManager(project_name=project_name)
+        self.episode_planner = EpisodePlanner(project_name=project_name)
         self.artifact_store = EpisodeArtifactStore(project_name=project_name)
         # ContextManager가 생성한 동적 경로를 참조
         self.chapters_dir = self.ctx.data_dir / "chapters"
@@ -25,11 +27,18 @@ class Generator:
         plot_strength: str = "balanced",
     ) -> str:
         """컨텍스트를 모아 LLM에 전달하고 생성된 원고 텍스트를 반환합니다."""
+        episode_plan = self.episode_planner.build_episode_plan(
+            instruction,
+            length_goal=length_goal,
+            include_plot=include_plot,
+            plot_strength=plot_strength,
+        )
         prompt = self.ctx.build_generation_prompt(
             instruction,
             length_goal,
             include_plot=include_plot,
             plot_strength=plot_strength,
+            episode_plan=episode_plan,
         )
         print(f">> [{self.ctx.project_name}] 작품 생성 요청 중...")
         system_instruction = f"너는 사용자가 제시한 목표 분량(공백 포함 약 {length_goal}자 내외)을 엄격하게 지키으면서 기승전결이 있는 전개를 작성하는 프로 웹소설 작가야."

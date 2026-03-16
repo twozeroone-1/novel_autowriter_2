@@ -61,6 +61,67 @@ def build_plot_block(*, plot_outline: str, include_plot: bool, plot_strength: st
 """
 
 
+def build_episode_plan_block(plan_payload: dict | None) -> str:
+    if not isinstance(plan_payload, dict):
+        return ""
+
+    objective = str(plan_payload.get("episode_objective", "") or "").strip()
+    tone_notes = str(plan_payload.get("tone_notes", "") or "").strip()
+    target_length = plan_payload.get("target_length")
+
+    def _normalize_list(key: str) -> list[str]:
+        value = plan_payload.get(key, [])
+        if isinstance(value, str):
+            value = [value]
+        if not isinstance(value, list):
+            return []
+
+        normalized: list[str] = []
+        for item in value:
+            text = str(item or "").strip()
+            if text:
+                normalized.append(text)
+        return normalized
+
+    must_include_characters = _normalize_list("must_include_characters")
+    hooks_to_payoff = _normalize_list("hooks_to_payoff")
+    hooks_to_advance = _normalize_list("hooks_to_advance")
+    forbidden_moves = _normalize_list("forbidden_moves")
+    continuity_focus = _normalize_list("continuity_focus")
+    has_meaningful_content = any(
+        [
+            objective,
+            tone_notes,
+            must_include_characters,
+            hooks_to_payoff,
+            hooks_to_advance,
+            forbidden_moves,
+            continuity_focus,
+        ]
+    )
+    if not has_meaningful_content:
+        return ""
+
+    sections = ["[EPISODE PLAN] (이번 회차의 구조화 집필 가이드)"]
+    if objective:
+        sections.extend(["- episode_objective", f"  {objective}"])
+    if must_include_characters:
+        sections.extend(["- must_include_characters", f"  {', '.join(must_include_characters)}"])
+    if hooks_to_payoff:
+        sections.extend(["- hooks_to_payoff", f"  {', '.join(hooks_to_payoff)}"])
+    if hooks_to_advance:
+        sections.extend(["- hooks_to_advance", f"  {', '.join(hooks_to_advance)}"])
+    if forbidden_moves:
+        sections.extend(["- forbidden_moves", f"  {', '.join(forbidden_moves)}"])
+    if continuity_focus:
+        sections.extend(["- continuity_focus", f"  {', '.join(continuity_focus)}"])
+    if tone_notes:
+        sections.extend(["- tone_notes", f"  {tone_notes}"])
+    if isinstance(target_length, int):
+        sections.extend(["- target_length", f"  {target_length}"])
+    return "\n".join(sections)
+
+
 def build_generation_prompt(
     *,
     worldview_context: str,
@@ -70,6 +131,7 @@ def build_generation_prompt(
     state_context: str,
     character_context: str,
     plot_block: str,
+    episode_plan_block: str = "",
     user_instruction: str,
     length_goal: int,
 ) -> str:
@@ -82,6 +144,7 @@ CONTINUITY를 깨지 말고, STATE의 갈등과 감정선을 자연스럽게 이
 {release_policy_context}
 {state_context}
 {character_context}
+{episode_plan_block}
 {plot_block}
 
 [이번 회차 작성 지시사항]
