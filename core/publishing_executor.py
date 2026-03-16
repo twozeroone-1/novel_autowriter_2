@@ -25,6 +25,7 @@ class PublishingExecutor:
             job.get("source_path", ""),
             episode_id=str(job.get("episode_id", "")).strip() or None,
         )
+        source_payload = _apply_source_override(source_payload=source_payload, source_override=job.get("source_override"))
         platform_results: dict[str, dict] = {}
         platform_config_updates: dict[str, dict] = {}
 
@@ -116,3 +117,15 @@ class PublishingExecutor:
         if platform_name == "novelpia":
             return NovelpiaClient(**kwargs)
         raise ValueError(f"Unsupported platform: {platform_name}")
+
+
+def _apply_source_override(*, source_payload: dict, source_override: dict | None) -> dict:
+    if not isinstance(source_override, dict):
+        return source_payload
+
+    merged = deepcopy(source_payload)
+    for field in ("title", "content"):
+        value = source_override.get(field)
+        if isinstance(value, str) and value.strip():
+            merged[field] = value
+    return merged

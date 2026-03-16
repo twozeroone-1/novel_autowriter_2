@@ -209,6 +209,50 @@ class TestPublishingExecutor(unittest.TestCase):
         self.assertEqual(result["source"]["artifact_status"], "publishable")
         self.assertIn(("upload_episode", "work-1", "Episode 12", "# 12화. 아티팩트\n\n아티팩트 본문"), fake_client.calls)
 
+    def test_publish_job_prefers_source_override_when_present(self):
+        from core.publishing_executor import PublishingExecutor
+
+        fake_client = FakeClient()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            chapter_path = projects_dir / "sample" / "chapters" / "12화.md"
+            chapter_path.parent.mkdir(parents=True, exist_ok=True)
+            chapter_path.write_text("# 12화. 계약의 대가\n\n원본 본문", encoding="utf-8")
+
+            with patch("core.chapter_source.DATA_PROJECTS_DIR", projects_dir):
+                executor = PublishingExecutor(
+                    project_name="sample",
+                    credential_loader=lambda project_name, platform_name: {"username": "id", "password": "pw"},
+                    client_factory=lambda **kwargs: fake_client,
+                )
+                result = executor.publish_job(
+                    job={
+                        "chapter_title": "Episode 12",
+                        "source_path": "chapters/12화.md",
+                        "source_override": {
+                            "title": "12화. 계약의 대가",
+                            "content": "# 12화. 계약의 대가\n\n수정된 본문",
+                        },
+                        "targets": {
+                            "munpia": {
+                                "selected": True,
+                                "work_id": "work-1",
+                                "episode_title": "Episode 12",
+                            }
+                        },
+                    },
+                    config={
+                        "browser": {"headless": True},
+                        "platforms": {
+                            "munpia": {"enabled": True, "work_id": ""},
+                        },
+                    },
+                )
+
+        self.assertEqual(result["source"]["content"], "# 12화. 계약의 대가\n\n수정된 본문")
+        self.assertIn(("upload_episode", "work-1", "Episode 12", "# 12화. 계약의 대가\n\n수정된 본문"), fake_client.calls)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -28,6 +28,19 @@ class TestPublishingQuality(unittest.TestCase):
         self.assertEqual(report["status"], "hard_fail")
         self.assertTrue(any("blocked marker" in item for item in report["errors"]))
 
+    def test_evaluate_publish_source_returns_retry_possible_for_repeated_lines(self):
+        evaluate_publish_source = self._load_evaluator()
+
+        report = evaluate_publish_source(
+            {
+                "title": "12화. 계약의 대가",
+                "content": "# 12화. 계약의 대가\n\n" + ("같은 줄입니다.\n" * 8) + ("정상 문단입니다.\n" * 40),
+            }
+        )
+
+        self.assertEqual(report["status"], "retry_possible")
+        self.assertTrue(any("repeated lines" in item for item in report["errors"]))
+
     def test_evaluate_publish_source_returns_publishable_for_valid_source(self):
         evaluate_publish_source = self._load_evaluator()
 

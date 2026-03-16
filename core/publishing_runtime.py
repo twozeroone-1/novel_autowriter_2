@@ -7,7 +7,7 @@ from core.chapter_source import load_chapter_source
 from core.publishing_canon import finalize_publish_canon
 from core.publishing_incidents import summarize_publish_attempt
 from core.publishing_policy import select_runnable_job
-from core.publishing_quality import evaluate_publish_source
+from core.quality_gate_orchestrator import evaluate_quality_gate
 from core.release_policy_engine import evaluate_release_policy
 from core.release_policy_store import ReleasePolicyStore
 from core.publishing_store import PublishingStore
@@ -77,14 +77,14 @@ class PublishingRuntime:
                 },
             },
         )
-        publish_quality = evaluate_publish_source(source_payload)
-        quality_report = deepcopy(publish_quality.get("raw_report", {})) or deepcopy(publish_quality)
+        publish_quality = evaluate_quality_gate(source_payload)
+        quality_report = deepcopy(publish_quality)
         self.snapshot_store.write_json_snapshot(run_id, "quality_report.json", quality_report)
         if publish_quality.get("status") != "publishable":
             last_error = "; ".join(str(item) for item in publish_quality.get("errors", []))
             job["status"] = "failed"
             job["last_error"] = last_error
-            runtime["status"] = "idle"
+            runtime["status"] = "blocked"
             runtime["current_job_id"] = None
             runtime["last_run_at"] = now.isoformat()
             runtime["last_error"] = last_error
@@ -102,6 +102,15 @@ class PublishingRuntime:
                 }
             )
             return
+
+        quality_source = _apply_quality_source_override(
+            source_payload=source_payload,
+            final_source=publish_quality.get("final_source"),
+        )
+        active_job["source_override"] = {
+            "title": str(quality_source.get("title", "")),
+            "content": str(quality_source.get("content", "")),
+        }
 
         result = self.executor.publish_job(job=deepcopy(active_job), config=deepcopy(config))
         self.snapshot_store.write_json_snapshot(run_id, "publish_result.json", result)
@@ -125,7 +134,7 @@ class PublishingRuntime:
             overall_status=overall_status,
             job=job,
             result=result,
-            source_payload=source_payload,
+            source_payload=quality_source,
             canon_store=self.canon_store,
             now=now,
         )
@@ -287,6 +296,17 @@ def _has_deferred_selected_targets(*, job: dict, allowed_platforms: set[str]) ->
         if str(platform_name) not in allowed_platforms:
             return True
     return False
+
+
+def _apply_quality_source_override(*, source_payload: dict, final_source: dict | None) -> dict:
+    if not isinstance(final_source, dict):
+        return deepcopy(source_payload)
+    merged = deepcopy(source_payload)
+    for field in ("title", "content"):
+        value = final_source.get(field)
+        if isinstance(value, str) and value.strip():
+            merged[field] = value
+    return merged
 
 
 def run_publishing_pass(*, now: datetime, executor_factory) -> None:
