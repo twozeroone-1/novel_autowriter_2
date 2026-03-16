@@ -39,6 +39,7 @@ class MunpiaClient(BasePlatformClient):
         self._browser_session = browser_session
         self.platform_config = platform_config or {}
         self.headless = headless
+        self._pending_publish_options: dict | None = None
 
     def login(self) -> PlatformActionResult:
         self._require_credentials()
@@ -115,6 +116,13 @@ class MunpiaClient(BasePlatformClient):
             episode_id=_extract_episode_id(browser.current_url),
         )
 
+    def set_publish_options(self, payload: dict) -> PlatformActionResult:
+        options = _normalize_publish_options(payload)
+        if options["publish_mode"] == "reserved":
+            raise PlatformError("Munpia reserved scheduling is not configured.", error_type="requires_user_action")
+        self._pending_publish_options = options
+        return PlatformActionResult(status="done", success=True)
+
     def verify_publication(self, expected: dict) -> PlatformActionResult:
         work_id = str(expected.get("work_id", "")).strip()
         episode_id = str(expected.get("episode_id", "")).strip()
@@ -182,3 +190,12 @@ def _extract_episode_id(url: str) -> str:
     if episode_id == "entry-complete":
         return ""
     return episode_id
+
+
+def _normalize_publish_options(payload: dict | None) -> dict:
+    raw = payload if isinstance(payload, dict) else {}
+    return {
+        "publish_mode": str(raw.get("publish_mode", "immediate") or "immediate").strip().lower(),
+        "visibility": str(raw.get("visibility", "public") or "public").strip().lower(),
+        "reserved_at": raw.get("reserved_at"),
+    }

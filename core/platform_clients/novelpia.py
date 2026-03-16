@@ -49,6 +49,7 @@ class NovelpiaClient(BasePlatformClient):
         self._browser_session = browser_session
         self.platform_config = platform_config or {}
         self.headless = headless
+        self._pending_publish_options: dict | None = None
 
     def login(self) -> PlatformActionResult:
         self._require_credentials()
@@ -140,7 +141,15 @@ class NovelpiaClient(BasePlatformClient):
             browser.fill(selectors["episode_title"], request.episode_title)
             browser.fill(selectors["episode_body"], request.content)
             if hasattr(browser, "select_option"):
-                browser.select_option(selectors["episode_category"], _content_category_value(request.visibility))
+                effective_visibility = (
+                    str(self._pending_publish_options.get("visibility", "")).strip()
+                    if isinstance(self._pending_publish_options, dict)
+                    else ""
+                ) or request.visibility
+                browser.select_option(
+                    selectors["episode_category"],
+                    _content_category_value(effective_visibility),
+                )
             if hasattr(browser, "click_if_present"):
                 dismissed = browser.click_if_present(selectors["dismiss_event_overlay"], timeout_ms=2000)
                 if not dismissed:
@@ -176,6 +185,13 @@ class NovelpiaClient(BasePlatformClient):
             work_id=request.work_id,
             episode_id=_extract_numeric_url_segment(browser.current_url),
         )
+
+    def set_publish_options(self, payload: dict) -> PlatformActionResult:
+        options = _normalize_publish_options(payload)
+        if options["publish_mode"] == "reserved":
+            raise PlatformError("Novelpia reserved scheduling is not configured.", error_type="requires_user_action")
+        self._pending_publish_options = options
+        return PlatformActionResult(status="done", success=True)
 
     def verify_publication(self, expected: dict) -> PlatformActionResult:
         work_id = str(expected.get("work_id", "")).strip()
@@ -247,6 +263,15 @@ def _content_category_value(visibility: str) -> str:
     if str(visibility).strip().lower() == "private":
         return "5"
     return "24"
+
+
+def _normalize_publish_options(payload: dict | None) -> dict:
+    raw = payload if isinstance(payload, dict) else {}
+    return {
+        "publish_mode": str(raw.get("publish_mode", "immediate") or "immediate").strip().lower(),
+        "visibility": str(raw.get("visibility", "public") or "public").strip().lower(),
+        "reserved_at": raw.get("reserved_at"),
+    }
 
 
 def _age_grade_value(age_grade: str) -> str:

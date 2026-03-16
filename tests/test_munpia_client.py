@@ -242,6 +242,47 @@ class TestMunpiaClient(unittest.TestCase):
             ],
         )
 
+    def test_set_publish_options_accepts_immediate_private_mode(self):
+        from core.platform_clients.munpia import MunpiaClient
+
+        client = MunpiaClient(
+            username="writer-id",
+            password="secret",
+            browser_session=FakeBrowserSession(),
+            platform_config={"upload_url_template": "https://munpia.test/work/{work_id}/episode/new"},
+        )
+
+        result = client.set_publish_options(
+            {
+                "publish_mode": "immediate",
+                "visibility": "private",
+                "reserved_at": None,
+            }
+        )
+
+        self.assertTrue(result.success)
+
+    def test_set_publish_options_rejects_reserved_mode(self):
+        from core.platform_clients.munpia import MunpiaClient
+
+        client = MunpiaClient(
+            username="writer-id",
+            password="secret",
+            browser_session=FakeBrowserSession(),
+            platform_config={"upload_url_template": "https://munpia.test/work/{work_id}/episode/new"},
+        )
+
+        with self.assertRaises(PlatformError) as context:
+            client.set_publish_options(
+                {
+                    "publish_mode": "reserved",
+                    "visibility": "private",
+                    "reserved_at": "2026-03-16T21:00:00+09:00",
+                }
+            )
+
+        self.assertEqual(context.exception.error_type, "requires_user_action")
+
     def test_verify_publication_succeeds_for_completed_episode_url(self):
         from core.platform_clients.munpia import MunpiaClient
 

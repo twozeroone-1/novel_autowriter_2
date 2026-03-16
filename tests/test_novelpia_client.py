@@ -430,6 +430,85 @@ class TestNovelpiaClient(unittest.TestCase):
             browser.actions,
         )
 
+    def test_set_publish_options_accepts_immediate_private_mode(self):
+        from core.platform_clients.novelpia import NovelpiaClient
+
+        client = NovelpiaClient(
+            username="writer-id",
+            password="secret",
+            browser_session=FakeBrowserSession(),
+            platform_config={
+                "upload_url_template": "https://novelpia.com/mynovel/all/write/{work_id}",
+            },
+        )
+
+        result = client.set_publish_options(
+            {
+                "publish_mode": "immediate",
+                "visibility": "private",
+                "reserved_at": None,
+            }
+        )
+
+        self.assertTrue(result.success)
+
+    def test_set_publish_options_rejects_reserved_mode(self):
+        from core.platform_clients.novelpia import NovelpiaClient
+
+        client = NovelpiaClient(
+            username="writer-id",
+            password="secret",
+            browser_session=FakeBrowserSession(),
+            platform_config={
+                "upload_url_template": "https://novelpia.com/mynovel/all/write/{work_id}",
+            },
+        )
+
+        with self.assertRaises(PlatformError) as context:
+            client.set_publish_options(
+                {
+                    "publish_mode": "reserved",
+                    "visibility": "private",
+                    "reserved_at": "2026-03-16T21:00:00+09:00",
+                }
+            )
+
+        self.assertEqual(context.exception.error_type, "requires_user_action")
+
+    def test_upload_episode_uses_pending_publish_options_for_private_visibility(self):
+        from core.platform_clients.novelpia import NovelpiaClient
+
+        browser = FakeBrowserSession(click_url="https://novelpia.com/mynovel/all/416704")
+        client = NovelpiaClient(
+            username="writer-id",
+            password="secret",
+            browser_session=browser,
+            platform_config={
+                "upload_url_template": "https://novelpia.com/mynovel/all/write/{work_id}",
+            },
+        )
+
+        client.set_publish_options(
+            {
+                "publish_mode": "immediate",
+                "visibility": "private",
+                "reserved_at": None,
+            }
+        )
+        client.upload_episode(
+            EpisodeUploadRequest(
+                work_id="416704",
+                episode_title="Episode 12",
+                content="body",
+                visibility="public",
+            )
+        )
+
+        self.assertIn(
+            ("select_option", "#content_cate", "5"),
+            browser.actions,
+        )
+
     def test_upload_episode_dismisses_event_overlay_when_present(self):
         from core.platform_clients.novelpia import NovelpiaClient
 

@@ -51,5 +51,9 @@ class BasePlatformClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def set_publish_options(self, payload: dict) -> PlatformActionResult:
+        raise NotImplementedError
+
+    @abstractmethod
     def verify_publication(self, expected: dict) -> PlatformActionResult:
         raise NotImplementedError

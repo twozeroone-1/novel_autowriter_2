@@ -12,11 +12,13 @@ class FakeClient:
         *,
         created_work_id: str = "",
         episode_id: str = "episode-1",
+        set_options_error: PlatformError | None = None,
         verification_result: PlatformActionResult | None = None,
         verification_error: PlatformError | None = None,
     ):
         self.created_work_id = created_work_id
         self.episode_id = episode_id
+        self.set_options_error = set_options_error
         self.verification_result = verification_result or PlatformActionResult(status="done", success=True)
         self.verification_error = verification_error
         self.calls = []
@@ -30,6 +32,19 @@ class FakeClient:
         if work_id:
             return PlatformActionResult(status="done", success=True, work_id=work_id)
         return PlatformActionResult(status="done", success=True, work_id=self.created_work_id or "created-work")
+
+    def set_publish_options(self, payload):
+        self.calls.append(
+            (
+                "set_publish_options",
+                payload.get("publish_mode", ""),
+                payload.get("visibility", ""),
+                payload.get("reserved_at"),
+            )
+        )
+        if self.set_options_error is not None:
+            raise self.set_options_error
+        return PlatformActionResult(status="done", success=True)
 
     def upload_episode(self, request):
         self.calls.append(("upload_episode", request.work_id, request.episode_title, request.content))
@@ -119,9 +134,57 @@ class TestPublishingExecutor(unittest.TestCase):
                 )
 
         build_publish_packages.assert_called_once()
+        self.assertIn(("set_publish_options", "immediate", "public", None), fake_client.calls)
         self.assertIn(("upload_episode", "work-1", "Packaged Episode 12", "# 12화. 계약의 대가\n\n패키저 본문"), fake_client.calls)
         self.assertIn(("verify_publication", "work-1", "episode-1"), fake_client.calls)
         self.assertEqual(result["packager_report"], packager_report)
+
+    def test_publish_job_marks_failed_when_set_publish_options_rejects_reserved_mode(self):
+        from core.publishing_executor import PublishingExecutor
+
+        fake_client = FakeClient(
+            set_options_error=PlatformError("reserved scheduling is unsupported", error_type="requires_user_action")
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            chapter_path = projects_dir / "sample" / "chapters" / "12화.md"
+            chapter_path.parent.mkdir(parents=True, exist_ok=True)
+            chapter_path.write_text("# 12화. 계약의 대가\n\n본문", encoding="utf-8")
+
+            with patch("core.chapter_source.DATA_PROJECTS_DIR", projects_dir):
+                executor = PublishingExecutor(
+                    project_name="sample",
+                    credential_loader=lambda project_name, platform_name: {"username": "id", "password": "pw"},
+                    client_factory=lambda **kwargs: fake_client,
+                )
+                result = executor.publish_job(
+                    job={
+                        "chapter_title": "Episode 12",
+                        "source_path": "chapters/12화.md",
+                        "targets": {
+                            "munpia": {
+                                "selected": True,
+                                "work_id": "work-1",
+                                "episode_title": "Episode 12",
+                                "publish_mode": "reserved",
+                                "visibility": "private",
+                                "reserved_at": "2026-03-16T21:00:00+09:00",
+                            }
+                        },
+                    },
+                    config={
+                        "browser": {"headless": True},
+                        "platforms": {
+                            "munpia": {"enabled": True, "work_id": ""},
+                        },
+                    },
+                )
+
+        self.assertFalse(result["platform_results"]["munpia"]["success"])
+        self.assertEqual(result["platform_results"]["munpia"]["error_type"], "requires_user_action")
+        self.assertIn(("set_publish_options", "reserved", "private", "2026-03-16T21:00:00+09:00"), fake_client.calls)
+        self.assertNotIn(("upload_episode", "work-1", "Episode 12", "# 12화. 계약의 대가\n\n본문"), fake_client.calls)
 
     def test_publish_job_marks_failed_when_verification_fails(self):
         from core.publishing_executor import PublishingExecutor

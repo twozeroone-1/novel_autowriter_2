@@ -37,6 +37,14 @@ class TestPlatformClientBase(unittest.TestCase):
         self.assertIsNotNone(method)
         self.assertTrue(getattr(method, "__isabstractmethod__", False))
 
+    def test_base_platform_client_exposes_set_publish_options_contract(self):
+        module = importlib.import_module("core.platform_clients.base")
+
+        method = getattr(module.BasePlatformClient, "set_publish_options", None)
+
+        self.assertIsNotNone(method)
+        self.assertTrue(getattr(method, "__isabstractmethod__", False))
+
 
 if __name__ == "__main__":
     unittest.main()

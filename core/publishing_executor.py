@@ -65,6 +65,7 @@ class PublishingExecutor:
                 headless=bool(config.get("browser", {}).get("headless", True)),
             )
             upload_result = None
+            publish_options: dict = {}
             try:
                 client.login()
                 work_id = str(package.get("work_id", "")).strip() or str(platform_config.get("work_id", "")).strip()
@@ -82,6 +83,12 @@ class PublishingExecutor:
                     if work_id:
                         platform_config_updates[platform_name] = {"work_id": work_id}
                 request_payload = package.get("upload_request", {})
+                publish_options = {
+                    "publish_mode": str(request_payload.get("publish_mode", "immediate")),
+                    "visibility": str(request_payload.get("visibility", "public")),
+                    "reserved_at": request_payload.get("reserved_at"),
+                }
+                client.set_publish_options(deepcopy(publish_options))
                 upload_result = client.upload_episode(
                     EpisodeUploadRequest(
                         work_id=work_id,
@@ -113,6 +120,7 @@ class PublishingExecutor:
                     "episode_id": verification_result.episode_id or upload_result.episode_id,
                     "error_type": verification_result.error_type,
                     "error_text": verification_result.error_text,
+                    "publish_options": deepcopy(publish_options),
                     "verification": verification_payload,
                     "expected_publication": expected_publication,
                 }
@@ -130,6 +138,7 @@ class PublishingExecutor:
                         "episode_id": upload_result.episode_id,
                         "error_type": exc.error_type,
                         "error_text": str(exc),
+                        "publish_options": deepcopy(publish_options),
                         "verification": {
                             "status": "failed",
                             "success": False,
@@ -146,6 +155,7 @@ class PublishingExecutor:
                     "success": False,
                     "error_type": exc.error_type,
                     "error_text": str(exc),
+                    "publish_options": deepcopy(publish_options) if "publish_options" in locals() else {},
                 }
             finally:
                 if hasattr(client, "close"):
