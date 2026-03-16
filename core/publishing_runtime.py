@@ -116,6 +116,9 @@ class PublishingRuntime:
         }
 
         result = self.executor.publish_job(job=deepcopy(active_job), config=deepcopy(config))
+        packager_report = result.get("packager_report")
+        if isinstance(packager_report, dict):
+            self.snapshot_store.write_json_snapshot(run_id, "packager_report.json", packager_report)
         self.snapshot_store.write_json_snapshot(run_id, "publish_result.json", result)
         platform_results = result.get("platform_results", {})
         platform_config_updates = result.get("platform_config_updates", {})

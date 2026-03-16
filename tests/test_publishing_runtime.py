@@ -921,6 +921,87 @@ class TestPublishingRuntime(unittest.TestCase):
 
         self.assertEqual(quality_report, quality_result)
 
+    def test_tick_writes_packager_report_snapshot_when_executor_returns_it(self):
+        module = importlib.import_module("core.publishing_runtime")
+        runtime_cls = getattr(module, "PublishingRuntime")
+        now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
+        executor = FakePublishingExecutor(
+            result={
+                "packager_report": {
+                    "source": {"title": "12화. 계약의 대가", "episode_id": "ep_012", "artifact_status": "publishable"},
+                    "packages": {
+                        "munpia": {
+                            "work_id": "work-1",
+                            "upload_request": {
+                                "episode_title": "Episode 12",
+                                "content": "# 12화. 계약의 대가\n\n본문",
+                                "publish_mode": "immediate",
+                                "visibility": "public",
+                                "reserved_at": None,
+                            },
+                            "expected_publication": {
+                                "episode_title": "Episode 12",
+                                "publish_mode": "immediate",
+                                "visibility": "public",
+                                "reserved_at": None,
+                            },
+                            "work_metadata": {
+                                "title": "Project title",
+                                "description": "",
+                                "genre": "",
+                                "age_grade": "general",
+                                "cover_path": "",
+                            },
+                        }
+                    },
+                },
+                "platform_results": {
+                    "munpia": {"status": "done", "success": True},
+                },
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            self._write_chapter(projects_dir)
+            with patch("core.publishing_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.chapter_source.DATA_PROJECTS_DIR", projects_dir
+            ), patch("core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.canon_store.DATA_PROJECTS_DIR", projects_dir
+            ), patch.object(
+                module,
+                "summarize_publish_attempt",
+                return_value={
+                    "job_status": "done",
+                    "runtime_status": "idle",
+                    "incident_type": "",
+                    "needs_user_action": False,
+                    "last_error": "",
+                },
+            ), patch.object(module, "finalize_publish_canon", return_value={"status": "skipped"}):
+                store = PublishingStore(project_name="sample")
+                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                store.save_queue(
+                    [
+                        {
+                            "id": "pub1",
+                            "episode_id": "ep_012",
+                            "source_path": "chapters/12화.md",
+                            "chapter_title": "Episode 12",
+                            "status": "pending",
+                            "attempt_count": 0,
+                            "targets": {"munpia": {"selected": True, "status": "pending"}},
+                        }
+                    ]
+                )
+                runtime = runtime_cls(store=store, executor=executor)
+
+                runtime.tick(now=now)
+                run_dirs = list((projects_dir / "sample" / "runs").glob("*"))
+                packager_report = json.loads((run_dirs[0] / "packager_report.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(packager_report["packages"]["munpia"]["work_id"], "work-1")
+
     def test_tick_uses_incident_summary_to_set_runtime_and_job_status(self):
         module = importlib.import_module("core.publishing_runtime")
         runtime_cls = getattr(module, "PublishingRuntime")
