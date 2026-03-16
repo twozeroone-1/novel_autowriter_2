@@ -3,7 +3,16 @@ from pathlib import Path
 
 from core.app_paths import DATA_PROJECTS_DIR
 from core.canon_store import CanonStore
+from core.context_state_shadow import load_state_shadow_snapshot, write_legacy_state_shadow
 from core.context_state_store import DEFAULT_CONTEXT_STATE, ContextStateStore
+from core.context_story_bible_shadow import (
+    DEFAULT_STORY_BIBLE_SHADOW,
+    load_raw_config_payload,
+    load_story_bible_shadow_payload,
+    normalize_story_bible_shadow_payload,
+    write_story_bible_shadow,
+    write_story_bible_shadow_payload,
+)
 from core.file_utils import atomic_write_json
 from core.plot_store import DEFAULT_PLOT, PlotStore
 from core.release_policy_store import ReleasePolicyStore
@@ -11,11 +20,6 @@ from core.story_bible_store import DEFAULT_STORY_BIBLE, StoryBibleStore
 
 
 BASE_DATA_DIR = DATA_PROJECTS_DIR
-DEFAULT_STORY_BIBLE_SHADOW = {
-    "worldview": "여기에 세계관(STORY_BIBLE)을 작성해 주세요.",
-    "tone_and_manner": "여기에 문체(STYLE_GUIDE) 지침을 작성해 주세요.",
-    "continuity": "여기에 절대 변경 불가 룰, 연표, 관계도(CONTINUITY)를 작성하세요.",
-}
 # Primary public defaults for Story Bible-only settings.
 DEFAULT_STORY_BIBLE_SETTINGS = DEFAULT_STORY_BIBLE_SHADOW
 
@@ -81,13 +85,10 @@ class ContextManager:
         return merged
 
     def _load_story_bible_shadow_payload(self) -> dict:
-        return self._normalize_story_bible_shadow_payload(self._load_json(self.config_path))
+        return load_story_bible_shadow_payload(self.config_path)
 
     def _load_raw_config_payload(self) -> dict:
-        payload = self._load_json(self.config_path)
-        if isinstance(payload, dict):
-            return payload.copy()
-        return {}
+        return load_raw_config_payload(self.config_path)
 
     def _build_story_bible_compatibility_view(self, shadow_payload: dict) -> dict:
         merged = DEFAULT_STORY_BIBLE_SHADOW.copy()
@@ -116,9 +117,7 @@ class ContextManager:
         return merged
 
     def _write_story_bible_shadow_payload(self, payload: dict) -> None:
-        merged = self._load_raw_config_payload()
-        merged.update(self._normalize_story_bible_shadow_payload(payload))
-        atomic_write_json(self.config_path, merged)
+        write_story_bible_shadow_payload(self.config_path, payload)
 
     def _write_story_bible_shadow(
         self,
@@ -127,11 +126,12 @@ class ContextManager:
         tone_and_manner: str,
         continuity: str,
     ) -> None:
-        shadow_payload = self._load_story_bible_shadow_payload()
-        shadow_payload["worldview"] = str(worldview)
-        shadow_payload["tone_and_manner"] = str(tone_and_manner)
-        shadow_payload["continuity"] = str(continuity)
-        self._write_story_bible_shadow_payload(shadow_payload)
+        write_story_bible_shadow(
+            self.config_path,
+            worldview=worldview,
+            tone_and_manner=tone_and_manner,
+            continuity=continuity,
+        )
 
     def _load_plot_payload(self) -> dict:
         if self.plot_store.plot_path.exists():
@@ -157,14 +157,11 @@ class ContextManager:
         state: str | None = None,
         summary_of_previous: str | None = None,
     ) -> None:
-        config = self._load_raw_config_payload()
-        if not config:
-            config = DEFAULT_STORY_BIBLE_SHADOW.copy()
-        if state is not None:
-            config["state"] = str(state)
-        if summary_of_previous is not None:
-            config["summary_of_previous"] = str(summary_of_previous)
-        atomic_write_json(self.config_path, config)
+        write_legacy_state_shadow(
+            self.config_path,
+            state=state,
+            summary_of_previous=summary_of_previous,
+        )
 
     def _get_story_bible_prompt_fields(self) -> dict[str, str]:
         story_bible = self.story_bible_store.load()
@@ -177,15 +174,7 @@ class ContextManager:
     def _get_state_snapshot(self) -> dict[str, str]:
         if self.context_state_store.context_state_path.exists():
             return self.context_state_store.load()
-        config = self._load_raw_config_payload()
-        snapshot = DEFAULT_CONTEXT_STATE.copy()
-        for key, default_value in DEFAULT_CONTEXT_STATE.items():
-            value = config.get(key, default_value)
-            if value is None:
-                snapshot[key] = default_value
-            else:
-                snapshot[key] = value if isinstance(value, str) else str(value)
-        return snapshot
+        return load_state_shadow_snapshot(self.config_path)
 
     def _normalize_character(self, raw_char: object) -> dict | None:
         if not isinstance(raw_char, dict):
