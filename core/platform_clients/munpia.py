@@ -115,6 +115,33 @@ class MunpiaClient(BasePlatformClient):
             episode_id=_extract_episode_id(browser.current_url),
         )
 
+    def verify_publication(self, expected: dict) -> PlatformActionResult:
+        work_id = str(expected.get("work_id", "")).strip()
+        episode_id = str(expected.get("episode_id", "")).strip()
+        upload_url_template = str(self.platform_config.get("upload_url_template", "")).strip()
+        if not upload_url_template:
+            raise PlatformError("Munpia upload URL template is not configured.", error_type="requires_user_action")
+
+        editor_url = upload_url_template.format(work_id=work_id)
+        current_url = str(getattr(self._get_browser(), "current_url", "")).strip()
+        if not current_url or current_url == editor_url:
+            raise PlatformError(
+                "Munpia publication verification is still on the editor page.",
+                error_type="retryable",
+            )
+        if episode_id and episode_id not in current_url:
+            raise PlatformError(
+                "Munpia publication verification did not reach the expected episode URL.",
+                error_type="retryable",
+            )
+
+        return PlatformActionResult(
+            status="done",
+            success=True,
+            work_id=work_id,
+            episode_id=episode_id or _extract_episode_id(current_url),
+        )
+
     def close(self) -> None:
         if self._browser_session is not None:
             self._browser_session.close()

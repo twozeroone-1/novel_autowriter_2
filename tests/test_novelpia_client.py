@@ -495,6 +495,58 @@ class TestNovelpiaClient(unittest.TestCase):
             browser.actions,
         )
 
+    def test_verify_publication_succeeds_for_viewer_url(self):
+        from core.platform_clients.novelpia import NovelpiaClient
+
+        browser = FakeBrowserSession()
+        browser.current_url = "https://novelpia.com/viewer/5471585"
+        client = NovelpiaClient(
+            username="writer-id",
+            password="secret",
+            browser_session=browser,
+            platform_config={
+                "upload_url_template": "https://novelpia.com/mynovel/all/write/{work_id}",
+            },
+        )
+
+        result = client.verify_publication({"work_id": "416704", "episode_id": "5471585"})
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.episode_id, "5471585")
+
+    def test_verify_publication_fails_retryably_for_editor_or_write_proc_url(self):
+        from core.platform_clients.novelpia import NovelpiaClient
+
+        editor_client = NovelpiaClient(
+            username="writer-id",
+            password="secret",
+            browser_session=FakeBrowserSession(),
+            platform_config={
+                "upload_url_template": "https://novelpia.com/mynovel/all/write/{work_id}",
+            },
+        )
+        editor_client._browser_session.current_url = "https://novelpia.com/mynovel/all/write/416704"
+
+        with self.assertRaises(PlatformError) as editor_context:
+            editor_client.verify_publication({"work_id": "416704", "episode_id": "5471585"})
+
+        self.assertEqual(editor_context.exception.error_type, "retryable")
+
+        proc_client = NovelpiaClient(
+            username="writer-id",
+            password="secret",
+            browser_session=FakeBrowserSession(),
+            platform_config={
+                "upload_url_template": "https://novelpia.com/mynovel/all/write/{work_id}",
+            },
+        )
+        proc_client._browser_session.current_url = "https://novelpia.com/mynovel/all/write_proc"
+
+        with self.assertRaises(PlatformError) as proc_context:
+            proc_client.verify_publication({"work_id": "416704", "episode_id": "5471585"})
+
+        self.assertEqual(proc_context.exception.error_type, "retryable")
+
 
 if __name__ == "__main__":
     unittest.main()

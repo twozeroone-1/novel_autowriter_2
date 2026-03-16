@@ -7,9 +7,18 @@ from core.platform_clients.base import PlatformActionResult, PlatformError
 
 
 class FakeClient:
-    def __init__(self, *, created_work_id: str = "", episode_id: str = "episode-1"):
+    def __init__(
+        self,
+        *,
+        created_work_id: str = "",
+        episode_id: str = "episode-1",
+        verification_result: PlatformActionResult | None = None,
+        verification_error: PlatformError | None = None,
+    ):
         self.created_work_id = created_work_id
         self.episode_id = episode_id
+        self.verification_result = verification_result or PlatformActionResult(status="done", success=True)
+        self.verification_error = verification_error
         self.calls = []
 
     def login(self):
@@ -30,6 +39,12 @@ class FakeClient:
             work_id=request.work_id,
             episode_id=self.episode_id,
         )
+
+    def verify_publication(self, expected):
+        self.calls.append(("verify_publication", expected.get("work_id", ""), expected.get("episode_id", "")))
+        if self.verification_error is not None:
+            raise self.verification_error
+        return self.verification_result
 
     def close(self):
         self.calls.append(("close",))
@@ -105,7 +120,51 @@ class TestPublishingExecutor(unittest.TestCase):
 
         build_publish_packages.assert_called_once()
         self.assertIn(("upload_episode", "work-1", "Packaged Episode 12", "# 12화. 계약의 대가\n\n패키저 본문"), fake_client.calls)
+        self.assertIn(("verify_publication", "work-1", "episode-1"), fake_client.calls)
         self.assertEqual(result["packager_report"], packager_report)
+
+    def test_publish_job_marks_failed_when_verification_fails(self):
+        from core.publishing_executor import PublishingExecutor
+
+        fake_client = FakeClient(
+            verification_error=PlatformError("viewer redirect missing", error_type="retryable")
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            chapter_path = projects_dir / "sample" / "chapters" / "12화.md"
+            chapter_path.parent.mkdir(parents=True, exist_ok=True)
+            chapter_path.write_text("# 12화. 계약의 대가\n\n본문", encoding="utf-8")
+
+            with patch("core.chapter_source.DATA_PROJECTS_DIR", projects_dir):
+                executor = PublishingExecutor(
+                    project_name="sample",
+                    credential_loader=lambda project_name, platform_name: {"username": "id", "password": "pw"},
+                    client_factory=lambda **kwargs: fake_client,
+                )
+                result = executor.publish_job(
+                    job={
+                        "chapter_title": "Episode 12",
+                        "source_path": "chapters/12화.md",
+                        "targets": {
+                            "munpia": {
+                                "selected": True,
+                                "work_id": "work-1",
+                                "episode_title": "Episode 12",
+                            }
+                        },
+                    },
+                    config={
+                        "browser": {"headless": True},
+                        "platforms": {
+                            "munpia": {"enabled": True, "work_id": ""},
+                        },
+                    },
+                )
+
+        self.assertFalse(result["platform_results"]["munpia"]["success"])
+        self.assertEqual(result["platform_results"]["munpia"]["error_type"], "retryable")
+        self.assertEqual(result["platform_results"]["munpia"]["verification"]["status"], "failed")
 
     def test_publish_job_uses_existing_work_id_and_uploads_selected_platform(self):
         from core.publishing_executor import PublishingExecutor

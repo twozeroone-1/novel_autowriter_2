@@ -64,6 +64,7 @@ class PublishingExecutor:
                 platform_config=platform_config,
                 headless=bool(config.get("browser", {}).get("headless", True)),
             )
+            upload_result = None
             try:
                 client.login()
                 work_id = str(package.get("work_id", "")).strip() or str(platform_config.get("work_id", "")).strip()
@@ -91,16 +92,55 @@ class PublishingExecutor:
                         reserved_at=request_payload.get("reserved_at"),
                     )
                 )
+                expected_publication = deepcopy(package.get("expected_publication", {}))
+                resolved_work_id = upload_result.work_id or work_id
+                expected_publication["work_id"] = resolved_work_id
+                if upload_result.episode_id:
+                    expected_publication["episode_id"] = upload_result.episode_id
+                verification_result = client.verify_publication(expected_publication)
+                verification_payload = {
+                    "status": verification_result.status,
+                    "success": verification_result.success,
+                    "work_id": verification_result.work_id or resolved_work_id,
+                    "episode_id": verification_result.episode_id or upload_result.episode_id,
+                    "error_type": verification_result.error_type,
+                    "error_text": verification_result.error_text,
+                }
                 platform_results[platform_name] = {
-                    "status": upload_result.status,
-                    "success": upload_result.success,
-                    "work_id": upload_result.work_id or work_id,
-                    "episode_id": upload_result.episode_id,
-                    "error_type": upload_result.error_type,
-                    "error_text": upload_result.error_text,
-                    "expected_publication": deepcopy(package.get("expected_publication", {})),
+                    "status": verification_result.status,
+                    "success": verification_result.success,
+                    "work_id": verification_result.work_id or resolved_work_id,
+                    "episode_id": verification_result.episode_id or upload_result.episode_id,
+                    "error_type": verification_result.error_type,
+                    "error_text": verification_result.error_text,
+                    "verification": verification_payload,
+                    "expected_publication": expected_publication,
                 }
             except PlatformError as exc:
+                if upload_result is not None:
+                    resolved_work_id = upload_result.work_id or work_id
+                    expected_publication = deepcopy(package.get("expected_publication", {}))
+                    expected_publication["work_id"] = resolved_work_id
+                    if upload_result.episode_id:
+                        expected_publication["episode_id"] = upload_result.episode_id
+                    platform_results[platform_name] = {
+                        "status": "failed",
+                        "success": False,
+                        "work_id": resolved_work_id,
+                        "episode_id": upload_result.episode_id,
+                        "error_type": exc.error_type,
+                        "error_text": str(exc),
+                        "verification": {
+                            "status": "failed",
+                            "success": False,
+                            "work_id": resolved_work_id,
+                            "episode_id": upload_result.episode_id,
+                            "error_type": exc.error_type,
+                            "error_text": str(exc),
+                        },
+                        "expected_publication": expected_publication,
+                    }
+                    continue
                 platform_results[platform_name] = {
                     "status": "failed",
                     "success": False,

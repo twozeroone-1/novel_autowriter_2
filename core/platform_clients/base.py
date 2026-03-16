@@ -49,3 +49,7 @@ class BasePlatformClient(ABC):
     @abstractmethod
     def upload_episode(self, request: EpisodeUploadRequest) -> PlatformActionResult:
         raise NotImplementedError
+
+    @abstractmethod
+    def verify_publication(self, expected: dict) -> PlatformActionResult:
+        raise NotImplementedError

@@ -242,6 +242,44 @@ class TestMunpiaClient(unittest.TestCase):
             ],
         )
 
+    def test_verify_publication_succeeds_for_completed_episode_url(self):
+        from core.platform_clients.munpia import MunpiaClient
+
+        browser = FakeBrowserSession()
+        browser.current_url = "https://munpia.test/work/work-1/episode/episode-7"
+        client = MunpiaClient(
+            username="writer-id",
+            password="secret",
+            browser_session=browser,
+            platform_config={
+                "upload_url_template": "https://munpia.test/work/{work_id}/episode/new",
+            },
+        )
+
+        result = client.verify_publication({"work_id": "work-1", "episode_id": "episode-7"})
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.episode_id, "episode-7")
+
+    def test_verify_publication_fails_retryably_when_still_on_editor_url(self):
+        from core.platform_clients.munpia import MunpiaClient
+
+        browser = FakeBrowserSession()
+        browser.current_url = "https://munpia.test/work/work-1/episode/new"
+        client = MunpiaClient(
+            username="writer-id",
+            password="secret",
+            browser_session=browser,
+            platform_config={
+                "upload_url_template": "https://munpia.test/work/{work_id}/episode/new",
+            },
+        )
+
+        with self.assertRaises(PlatformError) as context:
+            client.verify_publication({"work_id": "work-1", "episode_id": "episode-7"})
+
+        self.assertEqual(context.exception.error_type, "retryable")
+
 
 if __name__ == "__main__":
     unittest.main()

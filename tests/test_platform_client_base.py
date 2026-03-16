@@ -29,6 +29,14 @@ class TestPlatformClientBase(unittest.TestCase):
         self.assertEqual(str(error), "captcha required")
         self.assertEqual(error.error_type, "requires_user_action")
 
+    def test_base_platform_client_exposes_verify_publication_contract(self):
+        module = importlib.import_module("core.platform_clients.base")
+
+        method = getattr(module.BasePlatformClient, "verify_publication", None)
+
+        self.assertIsNotNone(method)
+        self.assertTrue(getattr(method, "__isabstractmethod__", False))
+
 
 if __name__ == "__main__":
     unittest.main()
