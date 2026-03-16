@@ -206,6 +206,15 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(settings["tone_and_manner"], "structured style")
                 self.assertEqual(settings["continuity"], "structured rules")
 
+    def test_context_module_no_longer_exports_default_config_alias(self):
+        self.assertFalse(hasattr(context_module, "DEFAULT_CONFIG"))
+
+    def test_context_manager_no_longer_exposes_get_config_alias(self):
+        self.assertFalse(hasattr(ContextManager, "get_config"))
+
+    def test_context_manager_no_longer_exposes_save_config_alias(self):
+        self.assertFalse(hasattr(ContextManager, "save_config"))
+
     # Compatibility alias path
 
     def test_default_config_compatibility_alias_points_to_story_bible_defaults(self):
