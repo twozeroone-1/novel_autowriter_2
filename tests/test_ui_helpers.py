@@ -34,7 +34,9 @@ from ui.app import (
     PROJECT_SETTINGS_SUBSECTION_LABELS,
     PROJECT_STATE_KEYS,
     PROJECT_TAB_LABELS,
+    apply_pending_project_navigation,
     load_project_textareas,
+    navigate_to_project_tab,
     normalize_project_name,
 )
 from ui.chapters import (
@@ -361,6 +363,9 @@ class TestUiHelpers(unittest.TestCase):
     def test_project_state_keys_include_project_settings_subsection(self):
         self.assertIn("project_settings_subsection", PROJECT_STATE_KEYS)
 
+    def test_project_state_keys_include_primary_navigation_state(self):
+        self.assertIn("project_primary_nav", PROJECT_STATE_KEYS)
+
     def test_project_state_keys_include_publishing_controls(self):
         self.assertIn("publishing_enabled", PROJECT_STATE_KEYS)
         self.assertIn("publishing_selected_job_id", PROJECT_STATE_KEYS)
@@ -393,6 +398,31 @@ class TestUiHelpers(unittest.TestCase):
             APP_DESCRIPTION,
             "현재 선택한 작품 환경에서 운영 상태, 회차 워크플로, 발행 준비를 확인하고 필요할 때만 세부 편집을 진행합니다.",
         )
+
+    def test_navigate_to_project_tab_queues_primary_and_secondary_navigation(self):
+        if not hasattr(app_module.st, "session_state") or not isinstance(app_module.st.session_state, dict):
+            app_module.st.session_state = {}
+        app_module.st.session_state.clear()
+
+        with patch.object(app_module.st, "rerun", lambda: None, create=True):
+            navigate_to_project_tab("작품 설정", subsection="기본 설정")
+
+        self.assertEqual(app_module.st.session_state["_pending_project_primary_nav"], "작품 설정")
+        self.assertEqual(app_module.st.session_state["_pending_project_settings_subsection"], "기본 설정")
+
+    def test_apply_pending_project_navigation_moves_pending_state_into_widget_state(self):
+        if not hasattr(app_module.st, "session_state") or not isinstance(app_module.st.session_state, dict):
+            app_module.st.session_state = {}
+        app_module.st.session_state.clear()
+        app_module.st.session_state["_pending_project_primary_nav"] = "발행 운영"
+        app_module.st.session_state["_pending_project_settings_subsection"] = "기본 설정"
+
+        apply_pending_project_navigation()
+
+        self.assertEqual(app_module.st.session_state["project_primary_nav"], "발행 운영")
+        self.assertEqual(app_module.st.session_state["project_settings_subsection"], "기본 설정")
+        self.assertNotIn("_pending_project_primary_nav", app_module.st.session_state)
+        self.assertNotIn("_pending_project_settings_subsection", app_module.st.session_state)
 
     def test_project_settings_subsection_labels_follow_secondary_navigation_order(self):
         self.assertEqual(

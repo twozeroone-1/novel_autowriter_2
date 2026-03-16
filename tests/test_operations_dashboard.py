@@ -1,6 +1,7 @@
 import sys
 import types
 import unittest
+from contextlib import nullcontext
 from unittest.mock import patch
 
 
@@ -29,7 +30,7 @@ if "streamlit" not in sys.modules:
     sys.modules["streamlit"] = streamlit_stub
 
 
-from ui.operations_dashboard import build_operations_overview_snapshot
+from ui.operations_dashboard import build_operations_overview_snapshot, render_operations_overview
 
 
 class TestOperationsDashboard(unittest.TestCase):
@@ -254,6 +255,90 @@ class TestOperationsDashboard(unittest.TestCase):
         self.assertIn("회차 워크플로 보기", shortcut_labels)
         self.assertIn("발행 운영 확인", shortcut_labels)
         self.assertIn("자동화/진단 확인", shortcut_labels)
+        self.assertEqual(snapshot["shortcut_actions"][0]["target_tab"], "작품 설정")
+        self.assertEqual(snapshot["shortcut_actions"][0]["target_subsection"], "기본 설정")
+
+    def test_render_operations_overview_triggers_navigation_callback_from_shortcut_button(self):
+        class FakeColumn:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeStreamlit:
+            def __init__(self):
+                self.session_state = {}
+
+            def header(self, *args, **kwargs):
+                return None
+
+            def caption(self, *args, **kwargs):
+                return None
+
+            def metric(self, *args, **kwargs):
+                return None
+
+            def divider(self, *args, **kwargs):
+                return None
+
+            def subheader(self, *args, **kwargs):
+                return None
+
+            def markdown(self, *args, **kwargs):
+                return None
+
+            def info(self, *args, **kwargs):
+                return None
+
+            def columns(self, count, *args, **kwargs):
+                return [FakeColumn() for _ in range(count)]
+
+            def button(self, label, *args, **kwargs):
+                return label == "프로젝트 통합 설정 열기"
+
+        app = types.SimpleNamespace(generator=types.SimpleNamespace(ctx=types.SimpleNamespace(project_name="sample", get_workspace_settings=lambda: {})))
+        snapshot = {
+            "settings_ready_count": 0,
+            "settings_total_count": 4,
+            "ready_platform_count": 0,
+            "enabled_platform_count": 0,
+            "runtime_status_text": "대기",
+            "pending_job_count": 0,
+            "platform_rows": (),
+            "blockers": (),
+            "next_actions": (),
+            "timeline_steps": ({"label": "설정", "state": "현재"},),
+            "shortcut_actions": (
+                {
+                    "label": "프로젝트 통합 설정 열기",
+                    "description": "기본 기준선을 채웁니다.",
+                    "target_tab": "작품 설정",
+                    "target_subsection": "기본 설정",
+                },
+            ),
+        }
+        calls = []
+
+        with (
+            patch("ui.operations_dashboard.st", FakeStreamlit()),
+            patch("ui.operations_dashboard.PublishingStore") as store_cls,
+            patch("ui.operations_dashboard.EpisodeArtifactStore") as artifact_cls,
+            patch("ui.operations_dashboard.RunSnapshotStore") as snapshot_cls,
+            patch("ui.operations_dashboard.build_operations_overview_snapshot", return_value=snapshot),
+        ):
+            store_cls.return_value.load_config.return_value = {}
+            store_cls.return_value.load_runtime.return_value = {}
+            store_cls.return_value.load_queue.return_value = []
+            artifact_cls.return_value.load_manifest.return_value = {}
+            snapshot_cls.return_value.runs_dir = types.SimpleNamespace(exists=lambda: False)
+
+            render_operations_overview(
+                app,
+                navigate_to_tab=lambda tab, subsection=None: calls.append((tab, subsection)),
+            )
+
+        self.assertEqual(calls, [("작품 설정", "기본 설정")])
 
 
 if __name__ == "__main__":

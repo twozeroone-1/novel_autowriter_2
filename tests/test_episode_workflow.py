@@ -1,6 +1,8 @@
 import sys
 import types
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 
 if "streamlit" not in sys.modules:
@@ -34,7 +36,7 @@ if "dotenv" not in sys.modules:
     sys.modules["dotenv"] = dotenv_stub
 
 
-from ui.episode_workflow import build_episode_workflow_snapshot
+from ui.episode_workflow import build_episode_workflow_snapshot, render_episode_workflow
 
 
 class TestEpisodeWorkflow(unittest.TestCase):
@@ -183,6 +185,99 @@ class TestEpisodeWorkflow(unittest.TestCase):
 
         self.assertEqual(snapshot["next_actions"][0], "고급: 회차 생성에서 새 초안을 만들고 저장하세요.")
         self.assertEqual(snapshot["shortcut_actions"][0]["label"], "고급: 회차 생성 열기")
+        self.assertEqual(snapshot["shortcut_actions"][0]["target_tab"], "고급: 회차 생성")
+
+    def test_render_episode_workflow_triggers_navigation_callback_from_shortcut_button(self):
+        class FakeColumn:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeStreamlit:
+            def __init__(self):
+                self.session_state = {}
+
+            def header(self, *args, **kwargs):
+                return None
+
+            def caption(self, *args, **kwargs):
+                return None
+
+            def markdown(self, *args, **kwargs):
+                return None
+
+            def divider(self, *args, **kwargs):
+                return None
+
+            def subheader(self, *args, **kwargs):
+                return None
+
+            def columns(self, count, *args, **kwargs):
+                if isinstance(count, (list, tuple)):
+                    count = len(count)
+                return [FakeColumn() for _ in range(count)]
+
+            def button(self, label, *args, **kwargs):
+                return label == "발행 운영 열기"
+
+            def expander(self, *args, **kwargs):
+                return FakeColumn()
+
+            def code(self, *args, **kwargs):
+                return None
+
+            def info(self, *args, **kwargs):
+                return None
+
+        app = types.SimpleNamespace(generator=types.SimpleNamespace(ctx=types.SimpleNamespace(project_name="sample")))
+        context = {
+            "manifest": {},
+            "latest_episode_content": "",
+            "latest_episode_plan": {},
+            "latest_quality_report": {},
+            "latest_packager_report": {},
+            "publishing_queue": [],
+            "publishing_history": [],
+        }
+        snapshot = {
+            "steps": ({"label": "계획", "state": "완료", "summary": "ok"},),
+            "summary_lines": ("요약",),
+            "next_actions": ("다음",),
+            "shortcut_actions": (
+                {
+                    "label": "발행 운영 열기",
+                    "description": "발행 준비를 확인합니다.",
+                    "target_tab": "발행 운영",
+                    "target_subsection": None,
+                },
+            ),
+            "draft_path": "",
+            "draft_preview": "",
+            "quality_summary": "",
+            "critic_status": "",
+            "repair_applied": False,
+            "regenerate_applied": False,
+            "queue_link_summary": "",
+            "packager_summary": "",
+            "episode_plan_preview": {},
+            "quality_report_preview": {},
+            "packager_report_preview": {},
+        }
+        calls = []
+
+        with (
+            patch("ui.episode_workflow.st", FakeStreamlit()),
+            patch("ui.episode_workflow.load_episode_workflow_context", return_value=context),
+            patch("ui.episode_workflow.build_episode_workflow_snapshot", return_value=snapshot),
+        ):
+            render_episode_workflow(
+                app,
+                navigate_to_tab=lambda tab, subsection=None: calls.append((tab, subsection)),
+            )
+
+        self.assertEqual(calls, [("발행 운영", None)])
 
 
 if __name__ == "__main__":

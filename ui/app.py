@@ -86,6 +86,9 @@ PROJECT_STATE_KEYS = [
     "plot_result",
     "plot_result_view",
     "project_settings_subsection",
+    "project_primary_nav",
+    "_pending_project_primary_nav",
+    "_pending_project_settings_subsection",
     "automation_enabled",
     "automation_use_plot",
     "automation_plot_strength",
@@ -259,13 +262,16 @@ def build_app_services(project_name: str) -> AppServices:
 
 def render_project_settings_hub(app: AppServices) -> None:
     st.caption("보조 메뉴")
+    current_section = st.session_state.get("project_settings_subsection", PROJECT_SETTINGS_SUBSECTION_LABELS[0])
+    if current_section not in PROJECT_SETTINGS_SUBSECTION_LABELS:
+        current_section = PROJECT_SETTINGS_SUBSECTION_LABELS[0]
+        st.session_state["project_settings_subsection"] = current_section
 
     segmented_control = getattr(st, "segmented_control", None)
     if callable(segmented_control):
         selected_section = segmented_control(
             "프로젝트 통합 설정 보조 메뉴",
             PROJECT_SETTINGS_SUBSECTION_LABELS,
-            default=PROJECT_SETTINGS_SUBSECTION_LABELS[0],
             key="project_settings_subsection",
             label_visibility="collapsed",
         )
@@ -301,6 +307,51 @@ def render_project_settings_hub(app: AppServices) -> None:
     )
 
 
+def navigate_to_project_tab(target_tab: str, *, subsection: str | None = None) -> None:
+    if target_tab in PROJECT_TAB_LABELS:
+        st.session_state["_pending_project_primary_nav"] = target_tab
+    if subsection in PROJECT_SETTINGS_SUBSECTION_LABELS:
+        st.session_state["_pending_project_settings_subsection"] = subsection
+    st.rerun()
+
+
+def apply_pending_project_navigation() -> None:
+    pending_tab = st.session_state.pop("_pending_project_primary_nav", None)
+    if pending_tab in PROJECT_TAB_LABELS:
+        st.session_state["project_primary_nav"] = pending_tab
+
+    pending_subsection = st.session_state.pop("_pending_project_settings_subsection", None)
+    if pending_subsection in PROJECT_SETTINGS_SUBSECTION_LABELS:
+        st.session_state["project_settings_subsection"] = pending_subsection
+
+
+def render_primary_navigation() -> str:
+    apply_pending_project_navigation()
+    current_tab = st.session_state.get("project_primary_nav", PROJECT_TAB_LABELS[0])
+    if current_tab not in PROJECT_TAB_LABELS:
+        current_tab = PROJECT_TAB_LABELS[0]
+        st.session_state["project_primary_nav"] = current_tab
+    elif "project_primary_nav" not in st.session_state:
+        st.session_state["project_primary_nav"] = current_tab
+
+    segmented_control = getattr(st, "segmented_control", None)
+    if callable(segmented_control):
+        return segmented_control(
+            "메인 메뉴",
+            PROJECT_TAB_LABELS,
+            key="project_primary_nav",
+            label_visibility="collapsed",
+        )
+
+    return st.radio(
+        "메인 메뉴",
+        PROJECT_TAB_LABELS,
+        key="project_primary_nav",
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+
+
 def main() -> None:
     get_automation_background_service()
     get_publishing_background_service()
@@ -319,31 +370,23 @@ def main() -> None:
 
     st.title(f"AI 소설 스튜디오 - [{current_project}]")
     st.markdown(APP_DESCRIPTION)
+    selected_tab = render_primary_navigation()
 
-    tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(PROJECT_TAB_LABELS)
-
-    with tab0:
-        render_operations_overview(app)
-
-    with tab1:
-        render_episode_workflow(app)
-
-    with tab2:
+    if selected_tab == PROJECT_TAB_LABELS[0]:
+        render_operations_overview(app, navigate_to_tab=navigate_to_project_tab)
+    elif selected_tab == PROJECT_TAB_LABELS[1]:
+        render_episode_workflow(app, navigate_to_tab=navigate_to_project_tab)
+    elif selected_tab == PROJECT_TAB_LABELS[2]:
         render_project_settings_hub(app)
-
-    with tab3:
+    elif selected_tab == PROJECT_TAB_LABELS[3]:
         render_generation_tab(app)
-
-    with tab4:
+    elif selected_tab == PROJECT_TAB_LABELS[4]:
         render_review_tab(app)
-
-    with tab5:
+    elif selected_tab == PROJECT_TAB_LABELS[5]:
         render_auto_mode_tab(app)
-
-    with tab6:
+    elif selected_tab == PROJECT_TAB_LABELS[6]:
         render_automation_tab(app)
-
-    with tab7:
+    else:
         render_publishing_tab(app)
 
 

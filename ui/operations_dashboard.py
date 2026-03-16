@@ -96,7 +96,7 @@ def build_operations_overview_snapshot(
     }
 
 
-def render_operations_overview(app) -> None:
+def render_operations_overview(app, *, navigate_to_tab=None) -> None:
     project_name = app.generator.ctx.project_name
     workspace_settings = app.generator.ctx.get_workspace_settings()
     store = PublishingStore(project_name=project_name)
@@ -169,8 +169,11 @@ def render_operations_overview(app) -> None:
 
     st.divider()
     st.subheader("바로가기 액션")
-    for action in snapshot["shortcut_actions"]:
-        st.markdown(f"- **{action['label']}**: {action['description']}")
+    _render_shortcut_actions(
+        snapshot["shortcut_actions"],
+        navigate_to_tab=navigate_to_tab,
+        key_prefix="operations_shortcut",
+    )
 
 
 def _build_next_actions(
@@ -270,18 +273,26 @@ def _build_shortcut_actions(
         {
             "label": "프로젝트 통합 설정 열기",
             "description": "STORY_BIBLE, CONTINUITY, STATE 등 핵심 문서를 먼저 점검합니다.",
+            "target_tab": "작품 설정",
+            "target_subsection": "기본 설정",
         },
         {
             "label": "회차 워크플로 보기",
             "description": "최근 계획, 초안, 품질 게이트, 패키지 상태를 한 번에 확인합니다.",
+            "target_tab": "회차 워크플로",
+            "target_subsection": None,
         },
         {
             "label": "발행 운영 확인",
             "description": "플랫폼 readiness, 업로드 큐, smoke 결과를 점검합니다.",
+            "target_tab": "발행 운영",
+            "target_subsection": None,
         },
         {
             "label": "자동화/진단 확인",
             "description": "자동화 런타임과 최근 진단 경고를 확인합니다.",
+            "target_tab": "자동화/진단",
+            "target_subsection": None,
         },
     ]
     if settings_ready_count < len(REQUIRED_WORKSPACE_FIELDS):
@@ -289,6 +300,17 @@ def _build_shortcut_actions(
     if runtime_status in {"blocked", "paused", "stopped"} or not publishing_ready:
         return actions
     return actions
+
+
+def _render_shortcut_actions(shortcut_actions: tuple[dict, ...], *, navigate_to_tab=None, key_prefix: str) -> None:
+    for index, action in enumerate(shortcut_actions):
+        if callable(navigate_to_tab):
+            if st.button(action["label"], key=f"{key_prefix}_{index}", use_container_width=True):
+                navigate_to_tab(action["target_tab"], subsection=action.get("target_subsection"))
+            st.caption(action["description"])
+            continue
+
+        st.markdown(f"- **{action['label']}**: {action['description']}")
 
 
 def _has_meaningful_plan(payload: dict) -> bool:

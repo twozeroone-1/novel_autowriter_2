@@ -101,7 +101,7 @@ def build_episode_workflow_snapshot(
     }
 
 
-def render_episode_workflow(app) -> None:
+def render_episode_workflow(app, *, navigate_to_tab=None) -> None:
     project_name = app.generator.ctx.project_name
     context = load_episode_workflow_context(project_name)
     snapshot = build_episode_workflow_snapshot(**context)
@@ -128,8 +128,11 @@ def render_episode_workflow(app) -> None:
             st.markdown(f"- {action}")
 
         st.subheader("바로가기 액션")
-        for action in snapshot["shortcut_actions"]:
-            st.markdown(f"- **{action['label']}**: {action['description']}")
+        _render_shortcut_actions(
+            snapshot["shortcut_actions"],
+            navigate_to_tab=navigate_to_tab,
+            key_prefix="episode_workflow_shortcut",
+        )
 
     with right_col:
         st.subheader("단계 상세")
@@ -482,10 +485,14 @@ def _build_shortcut_actions(
             {
                 "label": "고급: 회차 생성 열기",
                 "description": "새 초안을 만들고 최근 회차 아티팩트를 생성합니다.",
+                "target_tab": "고급: 회차 생성",
+                "target_subsection": None,
             },
             {
                 "label": "작품 설정 열기",
                 "description": "STORY_BIBLE과 STATE가 비어 있지 않은지 먼저 확인합니다.",
+                "target_tab": "작품 설정",
+                "target_subsection": "기본 설정",
             },
         ]
 
@@ -494,10 +501,14 @@ def _build_shortcut_actions(
             {
                 "label": "고급: 원고 검수 열기",
                 "description": "차단 사유를 보고 수정본을 다시 저장합니다.",
+                "target_tab": "고급: 원고 검수",
+                "target_subsection": None,
             },
             {
                 "label": "고급: 회차 생성 열기",
                 "description": "필요하면 초안을 다시 생성하거나 수동으로 보정합니다.",
+                "target_tab": "고급: 회차 생성",
+                "target_subsection": None,
             },
         ]
 
@@ -506,10 +517,14 @@ def _build_shortcut_actions(
             {
                 "label": "발행 운영 열기",
                 "description": "업로드 큐를 추가하고 발행 패키지를 준비합니다.",
+                "target_tab": "발행 운영",
+                "target_subsection": None,
             },
             {
                 "label": "자동화/진단 확인",
                 "description": "자동 발행 스케줄과 최근 진단 상태를 함께 점검합니다.",
+                "target_tab": "자동화/진단",
+                "target_subsection": None,
             },
         ]
 
@@ -518,10 +533,14 @@ def _build_shortcut_actions(
             {
                 "label": "발행 운영 열기",
                 "description": "대기 중인 업로드 작업과 플랫폼 상태를 확인합니다.",
+                "target_tab": "발행 운영",
+                "target_subsection": None,
             },
             {
                 "label": "자동화/진단 확인",
                 "description": "scheduled, cooldown, blocked 상태가 없는지 점검합니다.",
+                "target_tab": "자동화/진단",
+                "target_subsection": None,
             },
         ]
 
@@ -529,12 +548,27 @@ def _build_shortcut_actions(
         {
             "label": "회차 워크플로 유지",
             "description": "현재 흐름은 안정적입니다. 다음 회차 계획을 준비하세요.",
+            "target_tab": "회차 워크플로",
+            "target_subsection": None,
         },
         {
             "label": "고급: 반자동 실행 열기",
             "description": "필요하면 반자동 파이프라인으로 빠르게 다음 회차를 준비합니다.",
+            "target_tab": "고급: 반자동 실행",
+            "target_subsection": None,
         },
     ]
+
+
+def _render_shortcut_actions(shortcut_actions: tuple[dict, ...], *, navigate_to_tab=None, key_prefix: str) -> None:
+    for index, action in enumerate(shortcut_actions):
+        if callable(navigate_to_tab):
+            if st.button(action["label"], key=f"{key_prefix}_{index}", use_container_width=True):
+                navigate_to_tab(action["target_tab"], subsection=action.get("target_subsection"))
+            st.caption(action["description"])
+            continue
+
+        st.markdown(f"- **{action['label']}**: {action['description']}")
 
 
 def _dedupe_preserving_order(values: list[str]) -> list[str]:
