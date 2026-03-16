@@ -18,9 +18,11 @@ class FakePublishingExecutor:
             }
         }
         self.call_count = 0
+        self.last_job = None
 
     def publish_job(self, *, job: dict, config: dict) -> dict:
         self.call_count += 1
+        self.last_job = job
         return self.result
 
 
@@ -371,18 +373,147 @@ class TestPublishingRuntime(unittest.TestCase):
                 "core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir
             ), patch("core.canon_store.DATA_PROJECTS_DIR", projects_dir), patch.object(
                 module,
-                "select_runnable_job",
-                return_value={"action": "skip", "reason": "not_due", "job": None},
-            ) as select_runnable_job:
+                "evaluate_release_policy",
+                return_value={
+                    "action": "skip",
+                    "reason": "cooldown",
+                    "allowed_platforms": [],
+                    "blocked_platforms": {},
+                    "burst_slot": False,
+                    "next_runtime_status": "cooldown",
+                },
+            ) as evaluate_release_policy, patch.object(module, "select_runnable_job") as select_runnable_job:
                 store = PublishingStore(project_name="sample")
                 store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
                 executor = FakePublishingExecutor()
                 runtime = runtime_cls(store=store, executor=executor)
 
                 runtime.tick(now=now)
+                state = store.load_runtime()
+
+        evaluate_release_policy.assert_called_once()
+        select_runnable_job.assert_not_called()
+        self.assertEqual(executor.call_count, 0)
+        self.assertEqual(state["status"], "cooldown")
+
+    def test_tick_passes_allowed_platforms_into_queue_selector(self):
+        module = importlib.import_module("core.publishing_runtime")
+        runtime_cls = getattr(module, "PublishingRuntime")
+        now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            with patch("core.publishing_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir
+            ), patch("core.canon_store.DATA_PROJECTS_DIR", projects_dir), patch.object(
+                module,
+                "evaluate_release_policy",
+                return_value={
+                    "action": "run_now",
+                    "reason": "",
+                    "allowed_platforms": ["novelpia"],
+                    "blocked_platforms": {"munpia": "daily_limit_reached"},
+                    "burst_slot": False,
+                    "next_runtime_status": "idle",
+                },
+            ), patch.object(
+                module,
+                "select_runnable_job",
+                return_value={"action": "skip", "reason": "no_job", "job": None},
+            ) as select_runnable_job:
+                store = PublishingStore(project_name="sample")
+                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                store.save_queue(
+                    [
+                        {
+                            "id": "pub1",
+                            "source_path": "chapters/12화.md",
+                            "chapter_title": "Episode 12",
+                            "status": "pending",
+                            "attempt_count": 0,
+                            "targets": {
+                                "munpia": {"selected": True, "status": "pending"},
+                                "novelpia": {"selected": True, "status": "pending"},
+                            },
+                        }
+                    ]
+                )
+                executor = FakePublishingExecutor()
+                runtime = runtime_cls(store=store, executor=executor)
+
+                runtime.tick(now=now)
 
         select_runnable_job.assert_called_once()
+        _, kwargs = select_runnable_job.call_args
+        self.assertEqual(kwargs["allowed_platforms"], {"novelpia"})
         self.assertEqual(executor.call_count, 0)
+
+    def test_tick_filters_executor_job_targets_to_allowed_platforms(self):
+        module = importlib.import_module("core.publishing_runtime")
+        runtime_cls = getattr(module, "PublishingRuntime")
+        now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
+        executor = FakePublishingExecutor(
+            result={
+                "platform_results": {
+                    "novelpia": {"status": "done", "success": True},
+                }
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            self._write_chapter(projects_dir)
+            with patch("core.publishing_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.chapter_source.DATA_PROJECTS_DIR", projects_dir
+            ), patch("core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.canon_store.DATA_PROJECTS_DIR", projects_dir
+            ), patch.object(
+                module,
+                "evaluate_release_policy",
+                return_value={
+                    "action": "run_now",
+                    "reason": "",
+                    "allowed_platforms": ["novelpia"],
+                    "blocked_platforms": {"munpia": "daily_limit_reached"},
+                    "burst_slot": False,
+                    "next_runtime_status": "idle",
+                },
+            ), patch.object(
+                module,
+                "summarize_publish_attempt",
+                return_value={
+                    "job_status": "partial_failed",
+                    "runtime_status": "idle",
+                    "incident_type": "",
+                    "needs_user_action": False,
+                    "last_error": "",
+                },
+            ), patch.object(module, "finalize_publish_canon", return_value={"status": "skipped"}):
+                store = PublishingStore(project_name="sample")
+                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                store.save_queue(
+                    [
+                        {
+                            "id": "pub1",
+                            "source_path": "chapters/12화.md",
+                            "chapter_title": "Episode 12",
+                            "status": "pending",
+                            "attempt_count": 0,
+                            "targets": {
+                                "munpia": {"selected": True, "status": "pending"},
+                                "novelpia": {"selected": True, "status": "pending"},
+                            },
+                        }
+                    ]
+                )
+                runtime = runtime_cls(store=store, executor=executor)
+
+                runtime.tick(now=now)
+
+        self.assertEqual(executor.call_count, 1)
+        self.assertEqual(set(executor.last_job["targets"].keys()), {"munpia", "novelpia"})
+        self.assertFalse(executor.last_job["targets"]["munpia"]["selected"])
+        self.assertTrue(executor.last_job["targets"]["novelpia"]["selected"])
 
     def test_tick_records_hard_fail_quality_without_calling_executor(self):
         module = importlib.import_module("core.publishing_runtime")

@@ -8,6 +8,8 @@ from core.publishing_canon import finalize_publish_canon
 from core.publishing_incidents import summarize_publish_attempt
 from core.publishing_policy import select_runnable_job
 from core.publishing_quality import evaluate_publish_source
+from core.release_policy_engine import evaluate_release_policy
+from core.release_policy_store import ReleasePolicyStore
 from core.publishing_store import PublishingStore
 from core.run_snapshot_store import RunSnapshotStore
 
@@ -26,6 +28,7 @@ class PublishingRuntime:
         self.executor = executor
         self.snapshot_store = RunSnapshotStore(project_name=store.project_name)
         self.canon_store = CanonStore(project_name=store.project_name)
+        self.release_policy_store = ReleasePolicyStore(project_name=store.project_name)
 
     def tick(self, now: datetime, *, force: bool = False) -> None:
         config = self.store.load_config()
@@ -33,11 +36,14 @@ class PublishingRuntime:
         queue = self.store.load_queue()
         decision = self._select_job_decision(config=config, runtime=runtime, queue=queue, now=now, force=force)
         if decision.get("action") != "run_now":
+            self._persist_skip_runtime(runtime=runtime, decision=decision)
             return
 
         job = _resolve_queue_job(queue, decision.get("job"))
         if job is None:
             return
+        allowed_platforms = {str(name) for name in decision.get("allowed_platforms", [])}
+        active_job = _build_executor_job(job=job, allowed_platforms=allowed_platforms)
 
         job["status"] = "running"
         job["attempt_count"] = int(job.get("attempt_count", 0)) + 1
@@ -57,7 +63,12 @@ class PublishingRuntime:
             run_id,
             "input_snapshot.json",
             {
-                "job": deepcopy(job),
+                "job": deepcopy(active_job),
+                "policy": {
+                    "allowed_platforms": sorted(allowed_platforms),
+                    "blocked_platforms": deepcopy(decision.get("blocked_platforms", {})),
+                    "burst_slot": bool(decision.get("burst_slot", False)),
+                },
                 "source": {
                     "path": str(source_payload.get("path", "")),
                     "title": str(source_payload.get("title", "")),
@@ -92,14 +103,21 @@ class PublishingRuntime:
             )
             return
 
-        result = self.executor.publish_job(job=deepcopy(job), config=deepcopy(config))
+        result = self.executor.publish_job(job=deepcopy(active_job), config=deepcopy(config))
         self.snapshot_store.write_json_snapshot(run_id, "publish_result.json", result)
         platform_results = result.get("platform_results", {})
         platform_config_updates = result.get("platform_config_updates", {})
         self._apply_platform_results(job, platform_results)
+        self._apply_platform_results(active_job, platform_results)
         self._apply_platform_config_updates(config, platform_config_updates)
-        publish_summary = summarize_publish_attempt(job=job, platform_results=platform_results)
+        publish_summary = summarize_publish_attempt(job=active_job, platform_results=platform_results)
         overall_status = str(publish_summary.get("job_status", "failed"))
+        runtime_status = str(publish_summary.get("runtime_status", "idle"))
+        incident_type = str(publish_summary.get("incident_type", "")).strip()
+        if overall_status == "done" and _has_deferred_selected_targets(job=job, allowed_platforms=allowed_platforms):
+            overall_status = "partial_failed"
+            runtime_status = "idle"
+            incident_type = ""
         last_error = str(publish_summary.get("last_error", "")).strip()
         canon_update_report = finalize_publish_canon(
             project_name=self.store.project_name,
@@ -114,7 +132,7 @@ class PublishingRuntime:
 
         job["status"] = overall_status
         job["last_error"] = last_error
-        runtime["status"] = str(publish_summary.get("runtime_status", "idle"))
+        runtime["status"] = runtime_status
         runtime["current_job_id"] = None
         runtime["last_run_at"] = now.isoformat()
         runtime["last_error"] = last_error
@@ -131,7 +149,7 @@ class PublishingRuntime:
                 "platform_results": platform_results,
                 "quality_report": quality_report,
                 "publish_quality": publish_quality,
-                "incident_type": publish_summary.get("incident_type", ""),
+                "incident_type": incident_type,
                 "canon_update": canon_update_report,
             }
         )
@@ -163,13 +181,58 @@ class PublishingRuntime:
 
     def _select_job_decision(self, *, config: dict, runtime: dict, queue: list[dict], now: datetime, force: bool) -> dict:
         if force:
-            if runtime["status"] in {"paused", "running"}:
+            if runtime["status"] in {"paused", "running", "blocked"}:
                 return {"action": "skip", "reason": runtime["status"], "job": None}
-            for item in queue:
-                if item.get("status", "pending") in {"pending", "partial_failed"}:
-                    return {"action": "run_now", "reason": "", "job": item}
-            return {"action": "skip", "reason": "no_job", "job": None}
-        return select_runnable_job(config=config, runtime=runtime, queue=queue, now=now)
+            allowed_platforms = _collect_queue_selected_platforms(queue)
+            decision = select_runnable_job(queue=queue, allowed_platforms=allowed_platforms)
+            return {
+                **decision,
+                "allowed_platforms": sorted(allowed_platforms),
+                "blocked_platforms": {},
+                "burst_slot": False,
+                "next_runtime_status": "idle",
+            }
+
+        if not config.get("enabled", False):
+            return {"action": "skip", "reason": "disabled", "job": None}
+
+        release_policy = self._load_effective_release_policy(config=config, queue=queue)
+        policy_decision = evaluate_release_policy(
+            policy=release_policy,
+            runtime=runtime,
+            history=self.store.load_recent_history(limit=100),
+            now=now,
+            force=False,
+            schedule=config.get("schedule"),
+        )
+        if policy_decision.get("action") != "run_now":
+            return {**policy_decision, "job": None}
+
+        selector_decision = select_runnable_job(
+            queue=queue,
+            allowed_platforms={str(name) for name in policy_decision.get("allowed_platforms", [])},
+        )
+        return {**policy_decision, **selector_decision}
+
+    def _persist_skip_runtime(self, *, runtime: dict, decision: dict) -> None:
+        next_runtime_status = str(decision.get("next_runtime_status", "")).strip()
+        if not next_runtime_status or runtime.get("status") == next_runtime_status:
+            return
+        runtime["status"] = next_runtime_status
+        runtime["current_job_id"] = None
+        self.store.save_runtime(runtime)
+
+    def _load_effective_release_policy(self, *, config: dict, queue: list[dict]) -> dict:
+        policy = self.release_policy_store.load()
+        if self.release_policy_store.policy_path.exists():
+            return policy
+
+        selected_platforms = _collect_queue_selected_platforms(queue)
+        for platform_name, platform_policy in (policy.get("platforms") or {}).items():
+            if str(platform_name) in selected_platforms:
+                if isinstance(platform_policy, dict):
+                    platform_policy["enabled"] = True
+        return policy
 
 
 def _resolve_queue_job(queue: list[dict], selected_job: dict | None) -> dict | None:
@@ -183,6 +246,47 @@ def _resolve_queue_job(queue: list[dict], selected_job: dict | None) -> dict | N
     if selected_job in queue:
         return selected_job
     return None
+
+
+def _collect_queue_selected_platforms(queue: list[dict]) -> set[str]:
+    selected_platforms: set[str] = set()
+    for item in queue:
+        if item.get("status", "pending") not in {"pending", "partial_failed"}:
+            continue
+        targets = item.get("targets")
+        if not isinstance(targets, dict):
+            continue
+        for platform_name, target in targets.items():
+            if isinstance(target, dict) and target.get("selected", False):
+                selected_platforms.add(str(platform_name))
+    return selected_platforms
+
+
+def _build_executor_job(*, job: dict, allowed_platforms: set[str]) -> dict:
+    active_job = deepcopy(job)
+    targets = active_job.get("targets")
+    if not isinstance(targets, dict):
+        return active_job
+    for platform_name, target in targets.items():
+        if not isinstance(target, dict):
+            continue
+        if str(platform_name) not in allowed_platforms:
+            target["selected"] = False
+    return active_job
+
+
+def _has_deferred_selected_targets(*, job: dict, allowed_platforms: set[str]) -> bool:
+    targets = job.get("targets")
+    if not isinstance(targets, dict):
+        return False
+    for platform_name, target in targets.items():
+        if not isinstance(target, dict):
+            continue
+        if not target.get("selected", False):
+            continue
+        if str(platform_name) not in allowed_platforms:
+            return True
+    return False
 
 
 def run_publishing_pass(*, now: datetime, executor_factory) -> None:
