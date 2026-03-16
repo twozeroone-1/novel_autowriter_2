@@ -60,6 +60,7 @@ class TestPublishingSmoke(unittest.TestCase):
                         "name": "munpia",
                         "enabled": True,
                         "work_id": "work-1",
+                        "upload_url_template": "https://example.test/work/{work_id}/episode/new",
                     }
                 },
             },
@@ -114,6 +115,35 @@ class TestPublishingSmoke(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertEqual(result["platform_results"]["novelpia"]["error_type"], "requires_user_action")
 
+    def test_run_publishing_smoke_fails_when_upload_url_template_is_missing_without_creating_client(self):
+        from core.publishing_smoke import run_publishing_smoke
+
+        seen_client_creations: list[str] = []
+
+        def client_factory(**kwargs):
+            seen_client_creations.append(kwargs["platform_name"])
+            return FakeSmokeClient(**kwargs)
+
+        result = run_publishing_smoke(
+            project_name="sample",
+            config={
+                "browser": {"headless": True},
+                "platforms": {
+                    "novelpia": {
+                        "enabled": True,
+                        "work_id": "work-1",
+                        "upload_url_template": "",
+                    }
+                },
+            },
+            credential_loader=lambda _project, _platform: {"username": "writer-id", "password": "secret"},
+            client_factory=client_factory,
+        )
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["platform_results"]["novelpia"]["error_type"], "requires_user_action")
+        self.assertEqual(seen_client_creations, [])
+
     def test_run_publishing_smoke_fails_when_explicit_platform_is_disabled(self):
         from core.publishing_smoke import run_publishing_smoke
 
@@ -155,11 +185,13 @@ class TestPublishingSmoke(unittest.TestCase):
                         "name": "munpia",
                         "enabled": True,
                         "work_id": "work-1",
+                        "upload_url_template": "https://example.test/work/{work_id}/episode/new",
                     },
                     "novelpia": {
                         "name": "novelpia",
                         "enabled": True,
                         "work_id": "work-2",
+                        "upload_url_template": "https://example.test/work/{work_id}/episode/new",
                     },
                 },
             },
@@ -188,13 +220,14 @@ class TestPublishingSmoke(unittest.TestCase):
                 config={
                     "browser": {"headless": True},
                     "platforms": {
-                        "munpia": {
-                            "name": "munpia",
-                            "enabled": True,
-                            "work_id": "work-1",
-                        }
-                    },
+                    "munpia": {
+                        "name": "munpia",
+                        "enabled": True,
+                        "work_id": "work-1",
+                        "upload_url_template": "https://example.test/work/{work_id}/episode/new",
+                    }
                 },
+            },
                 credential_loader=load_platform_credentials,
                 client_factory=lambda **kwargs: FakeSmokeClient(**kwargs),
             )

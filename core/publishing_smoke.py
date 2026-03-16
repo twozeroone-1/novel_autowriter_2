@@ -4,6 +4,7 @@ from core.platform_clients.base import PlatformError
 from core.platform_clients.munpia import MunpiaClient
 from core.platform_clients.novelpia import NovelpiaClient
 from core.platform_credentials import load_platform_credentials
+from core.publishing_readiness import build_publishing_readiness_snapshot
 from core.publishing_store import PublishingStore
 
 
@@ -26,47 +27,39 @@ def run_publishing_smoke(
     selected_platforms = _resolve_selected_platforms(config=resolved_config, platforms=platforms)
     effective_headless = bool(resolved_config.get("browser", {}).get("headless", True)) if headless is None else bool(headless)
     build_client = client_factory or _default_client_factory
+    readiness_snapshot = build_publishing_readiness_snapshot(
+        project_name=project_name,
+        config=resolved_config,
+        credential_loader=credential_loader,
+    )
+    readiness_rows = {
+        row["platform_name"]: row
+        for row in readiness_snapshot.get("platform_rows", ())
+        if isinstance(row, dict) and row.get("platform_name")
+    }
 
     platform_results: dict[str, dict] = {}
     overall_success = True
 
     for platform_name in selected_platforms:
         platform_config = deepcopy(resolved_config.get("platforms", {}).get(platform_name, {}))
-        if not platform_config.get("enabled", False):
-            platform_results[platform_name] = _failure_result(
-                error_type="requires_user_action",
-                error_text=f"{platform_name} platform is disabled.",
-            )
-            overall_success = False
-            continue
-
-        credentials = credential_loader(project_name, platform_name)
-        if not credentials.get("username", "").strip() or not credentials.get("password", "").strip():
-            platform_results[platform_name] = _failure_result(
-                error_type="requires_user_action",
-                error_text=f"{platform_name} credentials are missing.",
-            )
-            overall_success = False
-            continue
-
-        work_id = str(platform_config.get("work_id", "")).strip()
-        if not work_id:
-            platform_results[platform_name] = _failure_result(
-                error_type="requires_user_action",
-                error_text=f"{platform_name} work_id is missing.",
-            )
+        row = readiness_rows.get(platform_name, {})
+        readiness_failure = _build_readiness_failure(platform_name=platform_name, row=row)
+        if readiness_failure is not None:
+            platform_results[platform_name] = readiness_failure
             overall_success = False
             continue
 
         platform_config.setdefault("name", platform_name)
         client = build_client(
             platform_name=platform_name,
-            username=credentials["username"],
-            password=credentials["password"],
+            username=credential_loader(project_name, platform_name)["username"],
+            password=credential_loader(project_name, platform_name)["password"],
             platform_config=platform_config,
             headless=effective_headless,
         )
         try:
+            work_id = str(platform_config.get("work_id", "")).strip()
             client.login()
             smoke_result = client.smoke_check_editor(work_id)
             platform_results[platform_name] = {
@@ -122,6 +115,30 @@ def _failure_result(*, error_type: str, error_text: str, work_id: str = "") -> d
         "error_text": error_text,
         "work_id": work_id,
     }
+
+
+def _build_readiness_failure(*, platform_name: str, row: dict) -> dict | None:
+    if not row.get("enabled", False):
+        return _failure_result(
+            error_type="requires_user_action",
+            error_text=f"{platform_name} platform is disabled.",
+        )
+    if not row.get("has_credentials", False):
+        return _failure_result(
+            error_type="requires_user_action",
+            error_text=f"{platform_name} credentials are missing.",
+        )
+    if not row.get("has_work_id", False):
+        return _failure_result(
+            error_type="requires_user_action",
+            error_text=f"{platform_name} work_id is missing.",
+        )
+    if not row.get("has_upload_url_template", False):
+        return _failure_result(
+            error_type="requires_user_action",
+            error_text=f"{platform_name} upload_url_template is missing.",
+        )
+    return None
 
 
 def _default_client_factory(**kwargs):
