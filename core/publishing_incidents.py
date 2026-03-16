@@ -27,6 +27,15 @@ def summarize_publish_attempt(*, job: dict, platform_results: dict) -> dict:
             "last_error": last_error,
         }
 
+    if all(_is_scheduled_status(status) for status in selected_statuses):
+        return {
+            "job_status": "scheduled",
+            "runtime_status": "scheduled",
+            "incident_type": "",
+            "needs_user_action": False,
+            "last_error": "",
+        }
+
     if all(_is_success_status(status) for status in selected_statuses):
         return {
             "job_status": "done",
@@ -65,3 +74,7 @@ def summarize_publish_attempt(*, job: dict, platform_results: dict) -> dict:
 
 def _is_success_status(status: object) -> bool:
     return str(status).strip().lower() in {"done", "scheduled"}
+
+
+def _is_scheduled_status(status: object) -> bool:
+    return str(status).strip().lower() == "scheduled"

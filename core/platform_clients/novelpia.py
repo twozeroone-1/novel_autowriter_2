@@ -205,8 +205,11 @@ class NovelpiaClient(BasePlatformClient):
         work_id = str(expected.get("work_id", "")).strip()
         episode_id = str(expected.get("episode_id", "")).strip()
         publish_mode = str(expected.get("publish_mode", "immediate") or "immediate").strip().lower()
+        verification_mode = str(expected.get("verification_mode", "") or "").strip().lower()
         current_url = str(getattr(self._get_browser(), "current_url", "")).strip()
         editor_url = _episode_editor_url(str(self.platform_config.get("upload_url_template", "")).strip(), work_id)
+        if verification_mode == "scheduled_follow_up":
+            return self._verify_scheduled_follow_up(expected=expected)
 
         if not current_url or current_url == editor_url or "write_proc" in current_url:
             raise PlatformError(
@@ -237,6 +240,33 @@ class NovelpiaClient(BasePlatformClient):
         if self._browser_session is not None:
             self._browser_session.close()
             self._browser_session = None
+
+    def _verify_scheduled_follow_up(self, *, expected: dict) -> PlatformActionResult:
+        work_id = str(expected.get("work_id", "")).strip()
+        episode_id = str(expected.get("episode_id", "")).strip()
+        episode_title = str(expected.get("episode_title", "")).strip()
+        if not work_id:
+            raise PlatformError("Novelpia scheduled verification requires a work ID.", error_type="requires_user_action")
+        if not episode_title:
+            raise PlatformError(
+                "Novelpia scheduled verification requires an episode title.",
+                error_type="requires_user_action",
+            )
+
+        browser = self._get_browser()
+        listing_url = _novelpia_work_listing_url(work_id=work_id)
+        browser.goto(listing_url)
+        if episode_title not in browser.content():
+            raise PlatformError(
+                "Novelpia scheduled publication is not visible on the work listing yet.",
+                error_type="retryable",
+            )
+        return PlatformActionResult(
+            status="done",
+            success=True,
+            work_id=work_id,
+            episode_id=episode_id,
+        )
 
     def _require_credentials(self) -> None:
         if not self.username or not self.password:
@@ -446,6 +476,10 @@ def _episode_editor_url(upload_url_template: str, work_id: str) -> str:
     if template:
         return template
     return f"https://novelpia.com/mynovel/all/write/{normalized_work_id}"
+
+
+def _novelpia_work_listing_url(*, work_id: str) -> str:
+    return f"https://novelpia.com/mynovel/all/{str(work_id).strip()}"
 
 
 def _extract_novelpia_writer_room_work_id(html: str, title: str) -> str:

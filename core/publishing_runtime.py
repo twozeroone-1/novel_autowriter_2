@@ -6,7 +6,7 @@ from core.canon_store import CanonStore
 from core.chapter_source import load_chapter_source
 from core.publishing_canon import finalize_publish_canon
 from core.publishing_incidents import summarize_publish_attempt
-from core.publishing_policy import select_runnable_job
+from core.publishing_policy import select_due_scheduled_job, select_runnable_job
 from core.quality_gate_orchestrator import evaluate_quality_gate
 from core.release_policy_engine import evaluate_release_policy
 from core.release_policy_store import ReleasePolicyStore
@@ -46,6 +46,7 @@ class PublishingRuntime:
         if job is None:
             return
         allowed_platforms = {str(name) for name in decision.get("allowed_platforms", [])}
+        execution_mode = str(decision.get("mode", "publish") or "publish")
         active_job = _build_executor_job(job=job, allowed_platforms=allowed_platforms)
 
         job["status"] = "running"
@@ -67,6 +68,7 @@ class PublishingRuntime:
             "input_snapshot.json",
             {
                 "job": deepcopy(active_job),
+                "mode": execution_mode,
                 "policy": {
                     "allowed_platforms": sorted(allowed_platforms),
                     "blocked_platforms": deepcopy(decision.get("blocked_platforms", {})),
@@ -80,55 +82,61 @@ class PublishingRuntime:
                 },
             },
         )
-        publish_quality = evaluate_quality_gate(
-            source_payload,
-            episode_plan=source_payload.get("episode_plan"),
-        )
+        publish_quality = {"status": "skipped", "reason": "scheduled_reconciliation"}
         quality_report = deepcopy(publish_quality)
         self.snapshot_store.write_json_snapshot(run_id, "quality_report.json", quality_report)
-        if publish_quality.get("status") != "publishable":
-            last_error = "; ".join(str(item) for item in publish_quality.get("errors", []))
-            release_policy = self._load_effective_release_policy(config=config, queue=queue)
-            history = self.store.load_recent_history(limit=100)
-            quality_stop_threshold = max(
-                0,
-                int((release_policy.get("global") or {}).get("stop_after_quality_incidents", 0) or 0),
+        quality_source = deepcopy(source_payload)
+        if execution_mode == "publish":
+            publish_quality = evaluate_quality_gate(
+                source_payload,
+                episode_plan=source_payload.get("episode_plan"),
             )
-            should_stop = quality_stop_threshold and (
-                _count_leading_quality_incidents(history=history) + 1 >= quality_stop_threshold
-            )
-            job["status"] = "failed"
-            job["last_error"] = last_error
-            runtime["status"] = "stopped" if should_stop else "blocked"
-            runtime["current_job_id"] = None
-            runtime["last_run_at"] = now.isoformat()
-            runtime["last_error"] = last_error
-            self.store.save_queue(queue)
-            self.store.save_runtime(runtime)
-            self.store.append_history(
-                {
-                    "timestamp": now.isoformat(),
-                    "job_id": job.get("id"),
-                    "chapter_title": job.get("chapter_title", ""),
-                    "success": False,
-                    "platform_results": {},
-                    "quality_report": quality_report,
-                    "publish_quality": publish_quality,
-                    "incident_type": QUALITY_INCIDENT_TYPE,
-                }
-            )
-            return
+            quality_report = deepcopy(publish_quality)
+            self.snapshot_store.write_json_snapshot(run_id, "quality_report.json", quality_report)
+            if publish_quality.get("status") != "publishable":
+                last_error = "; ".join(str(item) for item in publish_quality.get("errors", []))
+                release_policy = self._load_effective_release_policy(config=config, queue=queue)
+                history = self.store.load_recent_history(limit=100)
+                quality_stop_threshold = max(
+                    0,
+                    int((release_policy.get("global") or {}).get("stop_after_quality_incidents", 0) or 0),
+                )
+                should_stop = quality_stop_threshold and (
+                    _count_leading_quality_incidents(history=history) + 1 >= quality_stop_threshold
+                )
+                job["status"] = "failed"
+                job["last_error"] = last_error
+                runtime["status"] = "stopped" if should_stop else "blocked"
+                runtime["current_job_id"] = None
+                runtime["last_run_at"] = now.isoformat()
+                runtime["last_error"] = last_error
+                self.store.save_queue(queue)
+                self.store.save_runtime(runtime)
+                self.store.append_history(
+                    {
+                        "timestamp": now.isoformat(),
+                        "job_id": job.get("id"),
+                        "chapter_title": job.get("chapter_title", ""),
+                        "success": False,
+                        "platform_results": {},
+                        "quality_report": quality_report,
+                        "publish_quality": publish_quality,
+                        "incident_type": QUALITY_INCIDENT_TYPE,
+                    }
+                )
+                return
 
-        quality_source = _apply_quality_source_override(
-            source_payload=source_payload,
-            final_source=publish_quality.get("final_source"),
-        )
-        active_job["source_override"] = {
-            "title": str(quality_source.get("title", "")),
-            "content": str(quality_source.get("content", "")),
-        }
-
-        result = self.executor.publish_job(job=deepcopy(active_job), config=deepcopy(config))
+            quality_source = _apply_quality_source_override(
+                source_payload=source_payload,
+                final_source=publish_quality.get("final_source"),
+            )
+            active_job["source_override"] = {
+                "title": str(quality_source.get("title", "")),
+                "content": str(quality_source.get("content", "")),
+            }
+            result = self.executor.publish_job(job=deepcopy(active_job), config=deepcopy(config))
+        else:
+            result = self.executor.reconcile_scheduled_job(job=deepcopy(active_job), config=deepcopy(config))
         packager_report = result.get("packager_report")
         if isinstance(packager_report, dict):
             self.snapshot_store.write_json_snapshot(run_id, "packager_report.json", packager_report)
@@ -147,9 +155,7 @@ class PublishingRuntime:
             runtime_status = "idle"
             incident_type = ""
         last_error = str(publish_summary.get("last_error", "")).strip()
-        canon_overall_status = (
-            "scheduled" if overall_status == "done" and _has_scheduled_selected_targets(job=job) else overall_status
-        )
+        canon_overall_status = overall_status
         canon_update_report = finalize_publish_canon(
             project_name=self.store.project_name,
             episode_id=str(job.get("episode_id", "")).strip(),
@@ -211,11 +217,51 @@ class PublishingRuntime:
             platform_config.update(updates)
 
     def _select_job_decision(self, *, config: dict, runtime: dict, queue: list[dict], now: datetime, force: bool) -> dict:
+        if not force and not config.get("enabled", False):
+            return {"action": "skip", "reason": "disabled", "job": None, "mode": "", "next_runtime_status": "idle"}
+
+        if not force and runtime["status"] in {"paused", "blocked", "running", "stopped"}:
+            return {
+                "action": "skip",
+                "reason": runtime["status"],
+                "job": None,
+                "mode": "",
+                "allowed_platforms": [],
+                "blocked_platforms": {},
+                "burst_slot": False,
+                "next_runtime_status": runtime["status"],
+            }
+
+        scheduled_job = select_due_scheduled_job(queue=queue, now=now)
+        if scheduled_job is not None:
+            return {
+                "action": "run_now",
+                "reason": "",
+                "job": scheduled_job,
+                "mode": "reconcile_scheduled",
+                "allowed_platforms": sorted(_collect_scheduled_platforms(scheduled_job)),
+                "blocked_platforms": {},
+                "burst_slot": False,
+                "next_runtime_status": "scheduled",
+            }
+
+        if _has_waiting_scheduled_job(queue=queue):
+            return {
+                "action": "skip",
+                "reason": "scheduled_waiting",
+                "job": None,
+                "mode": "",
+                "allowed_platforms": [],
+                "blocked_platforms": {},
+                "burst_slot": False,
+                "next_runtime_status": "scheduled",
+            }
+
         if force:
             if runtime["status"] in {"paused", "running", "blocked"}:
-                return {"action": "skip", "reason": runtime["status"], "job": None}
+                return {"action": "skip", "reason": runtime["status"], "job": None, "mode": ""}
             allowed_platforms = _collect_queue_selected_platforms(queue)
-            decision = select_runnable_job(queue=queue, allowed_platforms=allowed_platforms)
+            decision = select_runnable_job(queue=queue, allowed_platforms=allowed_platforms, now=None)
             return {
                 **decision,
                 "allowed_platforms": sorted(allowed_platforms),
@@ -223,9 +269,6 @@ class PublishingRuntime:
                 "burst_slot": False,
                 "next_runtime_status": "idle",
             }
-
-        if not config.get("enabled", False):
-            return {"action": "skip", "reason": "disabled", "job": None}
 
         release_policy = self._load_effective_release_policy(config=config, queue=queue)
         policy_decision = evaluate_release_policy(
@@ -242,6 +285,7 @@ class PublishingRuntime:
         selector_decision = select_runnable_job(
             queue=queue,
             allowed_platforms={str(name) for name in policy_decision.get("allowed_platforms", [])},
+            now=None,
         )
         return {**policy_decision, **selector_decision}
 
@@ -339,6 +383,30 @@ def _has_scheduled_selected_targets(*, job: dict) -> bool:
         if not target.get("selected", False):
             continue
         if str(target.get("status", "")).strip().lower() == "scheduled":
+            return True
+    return False
+
+
+def _collect_scheduled_platforms(job: dict | None) -> set[str]:
+    if not isinstance(job, dict):
+        return set()
+    targets = job.get("targets")
+    if not isinstance(targets, dict):
+        return set()
+    platforms: set[str] = set()
+    for platform_name, target in targets.items():
+        if not isinstance(target, dict):
+            continue
+        if not target.get("selected", False):
+            continue
+        if str(target.get("status", "")).strip().lower() == "scheduled":
+            platforms.add(str(platform_name))
+    return platforms
+
+
+def _has_waiting_scheduled_job(*, queue: list[dict]) -> bool:
+    for item in queue:
+        if str(item.get("status", "")).strip().lower() == "scheduled":
             return True
     return False
 

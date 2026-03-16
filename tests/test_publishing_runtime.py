@@ -11,19 +11,31 @@ from core.publishing_store import PublishingStore
 
 
 class FakePublishingExecutor:
-    def __init__(self, result: dict | None = None):
+    def __init__(self, result: dict | None = None, reconcile_result: dict | None = None):
         self.result = result or {
             "platform_results": {
                 "munpia": {"status": "done", "success": True},
             }
         }
+        self.reconcile_result = reconcile_result or {
+            "platform_results": {
+                "novelpia": {"status": "done", "success": True},
+            }
+        }
         self.call_count = 0
+        self.reconcile_call_count = 0
         self.last_job = None
+        self.last_reconcile_job = None
 
     def publish_job(self, *, job: dict, config: dict) -> dict:
         self.call_count += 1
         self.last_job = job
         return self.result
+
+    def reconcile_scheduled_job(self, *, job: dict, config: dict) -> dict:
+        self.reconcile_call_count += 1
+        self.last_reconcile_job = job
+        return self.reconcile_result
 
 
 class TestPublishingRuntime(unittest.TestCase):
@@ -110,6 +122,129 @@ class TestPublishingRuntime(unittest.TestCase):
         self.assertEqual(state["last_run_at"], now.isoformat())
         self.assertEqual(len(history), 1)
         self.assertTrue(history[0]["success"])
+
+    def test_tick_persists_scheduled_job_when_reserved_upload_is_scheduled(self):
+        runtime_cls = self._load_runtime_cls()
+        now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            self._write_chapter(projects_dir)
+            with patch("core.publishing_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.chapter_source.DATA_PROJECTS_DIR", projects_dir
+            ), patch("core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.canon_store.DATA_PROJECTS_DIR", projects_dir
+            ):
+                store = PublishingStore(project_name="sample")
+                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                store.save_queue(
+                    [
+                        {
+                            "id": "pub1",
+                            "episode_id": "ep_012",
+                            "source_path": "chapters/12화.md",
+                            "chapter_title": "Episode 12",
+                            "status": "pending",
+                            "attempt_count": 0,
+                            "targets": {
+                                "novelpia": {
+                                    "selected": True,
+                                    "status": "pending",
+                                    "publish_mode": "reserved",
+                                    "reserved_at": "2026-03-12T21:10:00+00:00",
+                                }
+                            },
+                        }
+                    ]
+                )
+                executor = FakePublishingExecutor(
+                    result={
+                        "platform_results": {
+                            "novelpia": {"status": "scheduled", "success": True},
+                        }
+                    }
+                )
+                runtime = runtime_cls(store=store, executor=executor)
+
+                runtime.tick(now=now)
+                queue = store.load_queue()
+                state = store.load_runtime()
+                history = store.load_recent_history(limit=10)
+
+        self.assertEqual(queue[0]["status"], "scheduled")
+        self.assertEqual(queue[0]["targets"]["novelpia"]["status"], "scheduled")
+        self.assertEqual(state["status"], "scheduled")
+        self.assertFalse(history[0]["success"])
+
+    def test_tick_reconciles_due_scheduled_job_before_normal_publish_selection(self):
+        runtime_cls = self._load_runtime_cls()
+        now = datetime(2026, 3, 12, 21, 15, tzinfo=timezone.utc)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            self._write_chapter(projects_dir)
+            with patch("core.publishing_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.chapter_source.DATA_PROJECTS_DIR", projects_dir
+            ), patch("core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.canon_store.DATA_PROJECTS_DIR", projects_dir
+            ):
+                store = PublishingStore(project_name="sample")
+                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                store.save_queue(
+                    [
+                        {
+                            "id": "pub-scheduled",
+                            "episode_id": "ep_012",
+                            "source_path": "chapters/12화.md",
+                            "chapter_title": "Episode 12",
+                            "status": "scheduled",
+                            "attempt_count": 1,
+                            "targets": {
+                                "novelpia": {
+                                    "selected": True,
+                                    "status": "scheduled",
+                                    "work_id": "work-1",
+                                    "publish_mode": "reserved",
+                                    "episode_title": "Episode 12",
+                                    "reserved_at": "2026-03-12T21:10:00+00:00",
+                                }
+                            },
+                        },
+                        {
+                            "id": "pub-pending",
+                            "source_path": "chapters/12화.md",
+                            "chapter_title": "Episode 12",
+                            "status": "pending",
+                            "attempt_count": 0,
+                            "targets": {"munpia": {"selected": True, "status": "pending"}},
+                        },
+                    ]
+                )
+                executor = FakePublishingExecutor(
+                    reconcile_result={
+                        "platform_results": {
+                            "novelpia": {"status": "done", "success": True, "work_id": "work-1", "episode_id": "ep-99"},
+                        }
+                    }
+                )
+                runtime = runtime_cls(store=store, executor=executor)
+
+                with patch.object(
+                    importlib.import_module("core.publishing_runtime"),
+                    "finalize_publish_canon",
+                    return_value={"status": "applied", "source": "result", "candidate": {"timeline": ["ep_012"]}, "error": ""},
+                ) as finalize_publish_canon:
+                    runtime.tick(now=now)
+                    queue = store.load_queue()
+                    state = store.load_runtime()
+
+        self.assertEqual(executor.call_count, 0)
+        self.assertEqual(executor.reconcile_call_count, 1)
+        self.assertEqual(executor.last_reconcile_job["id"], "pub-scheduled")
+        self.assertEqual(queue[0]["status"], "done")
+        self.assertEqual(state["status"], "idle")
+        finalize_publish_canon.assert_called_once()
+        self.assertEqual(finalize_publish_canon.call_args.kwargs["overall_status"], "done")
 
     def test_tick_force_runs_pending_job_even_when_disabled_and_not_due(self):
         runtime_cls = self._load_runtime_cls()
@@ -1446,8 +1581,8 @@ class TestPublishingRuntime(unittest.TestCase):
                     queue = store.load_queue()
                     history = store.load_recent_history(limit=10)
 
-        self.assertEqual(queue[0]["status"], "done")
-        self.assertTrue(history[0]["success"])
+        self.assertEqual(queue[0]["status"], "scheduled")
+        self.assertFalse(history[0]["success"])
         finalize_publish_canon.assert_called_once()
         self.assertEqual(finalize_publish_canon.call_args.kwargs["overall_status"], "scheduled")
 

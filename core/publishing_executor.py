@@ -168,6 +168,90 @@ class PublishingExecutor:
             "platform_config_updates": platform_config_updates,
         }
 
+    def reconcile_scheduled_job(self, *, job: dict, config: dict) -> dict:
+        platform_results: dict[str, dict] = {}
+
+        for platform_name, target in deepcopy(job.get("targets", {})).items():
+            if not _is_reconcile_target(target):
+                continue
+
+            platform_config = deepcopy(config.get("platforms", {}).get(platform_name, {}))
+            if not platform_config.get("enabled", False):
+                platform_results[platform_name] = {
+                    "status": "failed",
+                    "success": False,
+                    "error_type": "permanent",
+                    "error_text": f"{platform_name} platform is disabled.",
+                }
+                continue
+
+            credentials = self.credential_loader(self.project_name, platform_name)
+            if not credentials.get("username", "").strip() or not credentials.get("password", "").strip():
+                platform_results[platform_name] = {
+                    "status": "failed",
+                    "success": False,
+                    "error_type": "requires_user_action",
+                    "error_text": f"{platform_name} credentials are missing.",
+                }
+                continue
+
+            client = self.client_factory(
+                platform_name=platform_name,
+                username=credentials["username"],
+                password=credentials["password"],
+                platform_config=platform_config,
+                headless=bool(config.get("browser", {}).get("headless", True)),
+            )
+            expected_publication = _build_scheduled_expected_publication(target=target)
+            try:
+                client.login()
+                verification_result = client.verify_publication(expected_publication)
+                platform_results[platform_name] = {
+                    "status": verification_result.status,
+                    "success": verification_result.success,
+                    "work_id": verification_result.work_id or str(target.get("work_id", "")),
+                    "episode_id": verification_result.episode_id or str(target.get("episode_id", "")),
+                    "error_type": verification_result.error_type,
+                    "error_text": verification_result.error_text,
+                    "verification": {
+                        "status": verification_result.status,
+                        "success": verification_result.success,
+                        "work_id": verification_result.work_id or str(target.get("work_id", "")),
+                        "episode_id": verification_result.episode_id or str(target.get("episode_id", "")),
+                        "error_type": verification_result.error_type,
+                        "error_text": verification_result.error_text,
+                    },
+                    "expected_publication": expected_publication,
+                }
+            except PlatformError as exc:
+                platform_results[platform_name] = {
+                    "status": "failed",
+                    "success": False,
+                    "work_id": str(target.get("work_id", "")),
+                    "episode_id": str(target.get("episode_id", "")),
+                    "error_type": exc.error_type,
+                    "error_text": str(exc),
+                    "verification": {
+                        "status": "failed",
+                        "success": False,
+                        "work_id": str(target.get("work_id", "")),
+                        "episode_id": str(target.get("episode_id", "")),
+                        "error_type": exc.error_type,
+                        "error_text": str(exc),
+                    },
+                    "expected_publication": expected_publication,
+                }
+            finally:
+                if hasattr(client, "close"):
+                    client.close()
+
+        return {
+            "source": {},
+            "packager_report": {},
+            "platform_results": platform_results,
+            "platform_config_updates": {},
+        }
+
     def _default_client_factory(self, **kwargs):
         platform_name = kwargs.pop("platform_name")
         if platform_name == "munpia":
@@ -187,3 +271,22 @@ def _apply_source_override(*, source_payload: dict, source_override: dict | None
         if isinstance(value, str) and value.strip():
             merged[field] = value
     return merged
+
+
+def _is_reconcile_target(target: object) -> bool:
+    if not isinstance(target, dict):
+        return False
+    if not target.get("selected", False):
+        return False
+    return str(target.get("status", "")).strip().lower() == "scheduled"
+
+
+def _build_scheduled_expected_publication(*, target: dict) -> dict:
+    return {
+        "work_id": str(target.get("work_id", "")),
+        "episode_id": str(target.get("episode_id", "")),
+        "episode_title": str(target.get("episode_title", "")),
+        "publish_mode": str(target.get("publish_mode", "reserved") or "reserved"),
+        "reserved_at": target.get("reserved_at"),
+        "verification_mode": "scheduled_follow_up",
+    }

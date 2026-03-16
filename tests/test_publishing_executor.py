@@ -233,6 +233,46 @@ class TestPublishingExecutor(unittest.TestCase):
         self.assertTrue(result["platform_results"]["novelpia"]["success"])
         self.assertEqual(result["platform_results"]["novelpia"]["verification"]["status"], "scheduled")
 
+    def test_reconcile_scheduled_job_verifies_without_uploading(self):
+        from core.publishing_executor import PublishingExecutor
+
+        fake_client = FakeClient(
+            verification_result=PlatformActionResult(status="done", success=True, work_id="work-1", episode_id="episode-99")
+        )
+
+        executor = PublishingExecutor(
+            project_name="sample",
+            credential_loader=lambda project_name, platform_name: {"username": "id", "password": "pw"},
+            client_factory=lambda **kwargs: fake_client,
+        )
+        result = executor.reconcile_scheduled_job(
+            job={
+                "id": "pub-scheduled",
+                "status": "scheduled",
+                "targets": {
+                    "novelpia": {
+                        "selected": True,
+                        "status": "scheduled",
+                        "work_id": "work-1",
+                        "episode_title": "Episode 12",
+                        "publish_mode": "reserved",
+                        "reserved_at": "2026-03-16T21:00:00+09:00",
+                    }
+                },
+            },
+            config={
+                "browser": {"headless": True},
+                "platforms": {
+                    "novelpia": {"enabled": True, "work_id": ""},
+                },
+            },
+        )
+
+        self.assertIn(("login",), fake_client.calls)
+        self.assertIn(("verify_publication", "work-1", ""), fake_client.calls)
+        self.assertNotIn(("upload_episode", "work-1", "Episode 12", ""), fake_client.calls)
+        self.assertEqual(result["platform_results"]["novelpia"]["status"], "done")
+
     def test_publish_job_marks_failed_when_verification_fails(self):
         from core.publishing_executor import PublishingExecutor
 

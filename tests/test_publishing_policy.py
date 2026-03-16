@@ -1,6 +1,7 @@
 import importlib
 import importlib.util
 import unittest
+from datetime import datetime, timezone
 
 
 class TestPublishingPolicy(unittest.TestCase):
@@ -60,6 +61,32 @@ class TestPublishingPolicy(unittest.TestCase):
 
         self.assertEqual(decision["action"], "run_now")
         self.assertEqual(decision["job"]["id"], "job-3")
+
+    def test_select_runnable_job_prioritizes_due_scheduled_job_before_pending(self):
+        select_runnable_job = self._load_selector()
+
+        decision = select_runnable_job(
+            queue=[
+                {
+                    "id": "job-scheduled",
+                    "status": "scheduled",
+                    "targets": {
+                        "novelpia": {
+                            "selected": True,
+                            "status": "scheduled",
+                            "reserved_at": "2026-03-16T21:00:00+09:00",
+                        }
+                    },
+                },
+                {"id": "job-pending", "status": "pending", "targets": {"munpia": {"selected": True}}},
+            ],
+            allowed_platforms={"munpia"},
+            now=datetime(2026, 3, 16, 12, 1, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(decision["action"], "run_now")
+        self.assertEqual(decision["job"]["id"], "job-scheduled")
+        self.assertEqual(decision["mode"], "reconcile_scheduled")
 
 
 if __name__ == "__main__":

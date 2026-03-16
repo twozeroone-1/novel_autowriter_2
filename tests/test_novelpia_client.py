@@ -712,6 +712,69 @@ class TestNovelpiaClient(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(result.status, "scheduled")
 
+    def test_verify_publication_returns_done_for_reserved_follow_up_listing_match(self):
+        from core.platform_clients.novelpia import NovelpiaClient
+
+        browser = FakeBrowserSession(
+            page_contents={
+                "https://novelpia.com/mynovel/all/416704": "<div>Episode 12</div>",
+            }
+        )
+        client = NovelpiaClient(
+            username="writer-id",
+            password="secret",
+            browser_session=browser,
+            platform_config={
+                "upload_url_template": "https://novelpia.com/mynovel/all/write/{work_id}",
+            },
+        )
+
+        result = client.verify_publication(
+            {
+                "work_id": "416704",
+                "episode_id": "",
+                "episode_title": "Episode 12",
+                "publish_mode": "reserved",
+                "reserved_at": "2026-03-16T21:00:00+09:00",
+                "verification_mode": "scheduled_follow_up",
+            }
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.status, "done")
+        self.assertIn(("goto", "https://novelpia.com/mynovel/all/416704", ""), browser.actions)
+
+    def test_verify_publication_raises_retryable_when_reserved_follow_up_title_is_missing(self):
+        from core.platform_clients.novelpia import NovelpiaClient
+
+        browser = FakeBrowserSession(
+            page_contents={
+                "https://novelpia.com/mynovel/all/416704": "<div>Other episode</div>",
+            }
+        )
+        client = NovelpiaClient(
+            username="writer-id",
+            password="secret",
+            browser_session=browser,
+            platform_config={
+                "upload_url_template": "https://novelpia.com/mynovel/all/write/{work_id}",
+            },
+        )
+
+        with self.assertRaises(PlatformError) as context:
+            client.verify_publication(
+                {
+                    "work_id": "416704",
+                    "episode_id": "",
+                    "episode_title": "Episode 12",
+                    "publish_mode": "reserved",
+                    "reserved_at": "2026-03-16T21:00:00+09:00",
+                    "verification_mode": "scheduled_follow_up",
+                }
+            )
+
+        self.assertEqual(context.exception.error_type, "retryable")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -32,8 +32,8 @@ class TestPublishingIncidents(unittest.TestCase):
             platform_results={"novelpia": {"status": "scheduled", "success": True}},
         )
 
-        self.assertEqual(summary["job_status"], "done")
-        self.assertEqual(summary["runtime_status"], "idle")
+        self.assertEqual(summary["job_status"], "scheduled")
+        self.assertEqual(summary["runtime_status"], "scheduled")
         self.assertEqual(summary["incident_type"], "")
 
     def test_summarize_publish_attempt_marks_paused_for_requires_user_action(self):
