@@ -3,6 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from core.platform_credentials import load_platform_credentials
+from core.publishing_readiness import build_publishing_readiness_snapshot
 from core.publishing_store import PublishingStore
 from ui.publishing import (
     PLATFORM_LABELS,
@@ -28,47 +29,15 @@ def build_operations_overview_snapshot(
         1 for key in REQUIRED_WORKSPACE_FIELDS if str(workspace_settings.get(key, "")).strip()
     )
 
-    platform_rows: list[dict] = []
-    blockers: list[str] = []
-    enabled_platform_count = 0
-    ready_platform_count = 0
-
-    for platform_name, platform_label in PLATFORM_LABELS.items():
-        platform_config = publishing_config.get("platforms", {}).get(platform_name, {})
-        enabled = bool(platform_config.get("enabled", False))
-        has_credentials = False
-        has_work_id = bool(str(platform_config.get("work_id", "")).strip())
-        has_upload_url_template = bool(str(platform_config.get("upload_url_template", "")).strip())
-
-        if enabled:
-            enabled_platform_count += 1
-            credentials = credential_loader(project_name, platform_name)
-            has_credentials = bool(
-                str(credentials.get("username", "")).strip() and str(credentials.get("password", "")).strip()
-            )
-
-            if not has_credentials:
-                blockers.append(f"{platform_label} 계정이 설정되지 않았습니다.")
-            if not has_work_id:
-                blockers.append(f"{platform_label} work_id가 비어 있습니다.")
-            if not has_upload_url_template:
-                blockers.append(f"{platform_label} 업로드 URL이 비어 있습니다.")
-            if has_credentials and has_work_id and has_upload_url_template:
-                ready_platform_count += 1
-
-        platform_rows.append(
-            {
-                "platform_name": platform_name,
-                "platform_label": platform_label,
-                "enabled": enabled,
-                "has_credentials": has_credentials,
-                "has_work_id": has_work_id,
-                "has_upload_url_template": has_upload_url_template,
-            }
-        )
-
-    if enabled_platform_count == 0:
-        blockers.append("활성화된 업로드 플랫폼이 없습니다.")
+    readiness_snapshot = build_publishing_readiness_snapshot(
+        project_name=project_name,
+        config=publishing_config,
+        credential_loader=credential_loader,
+    )
+    platform_rows = list(readiness_snapshot["platform_rows"])
+    blockers: list[str] = list(readiness_snapshot["blockers"])
+    enabled_platform_count = int(readiness_snapshot["enabled_platform_count"])
+    ready_platform_count = int(readiness_snapshot["ready_platform_count"])
 
     runtime_status = str(publishing_runtime.get("status", "idle")).strip().lower() or "idle"
     runtime_status_text = format_publishing_runtime_status(publishing_runtime)
@@ -80,11 +49,10 @@ def build_operations_overview_snapshot(
             else f"발행 런타임 상태를 확인하세요: {runtime_status_text} ({last_error})"
         )
 
-    publishing_ready = enabled_platform_count > 0 and ready_platform_count == enabled_platform_count
+    publishing_ready = bool(readiness_snapshot["publishing_ready"])
     next_actions = _build_next_actions(
         settings_ready_count=settings_ready_count,
-        enabled_platform_count=enabled_platform_count,
-        platform_rows=platform_rows,
+        readiness_actions=list(readiness_snapshot["recommended_actions"]),
         publishing_ready=publishing_ready,
         pending_job_count=count_pending_publishing_jobs(publishing_queue),
         runtime_status=runtime_status,
@@ -167,8 +135,7 @@ def render_operations_overview(app) -> None:
 def _build_next_actions(
     *,
     settings_ready_count: int,
-    enabled_platform_count: int,
-    platform_rows: list[dict],
+    readiness_actions: list[str],
     publishing_ready: bool,
     pending_job_count: int,
     runtime_status: str,
@@ -177,18 +144,7 @@ def _build_next_actions(
 
     if settings_ready_count < len(REQUIRED_WORKSPACE_FIELDS):
         next_actions.append("프로젝트 통합 설정에서 STORY_BIBLE / STATE 핵심 문서를 채우세요.")
-
-    if enabled_platform_count == 0:
-        next_actions.append("외부 플랫폼 업로드에서 업로드 플랫폼을 활성화하세요.")
-
-    if any(row["enabled"] and not row["has_credentials"] for row in platform_rows):
-        next_actions.append("플랫폼 계정을 keyring 또는 env fallback으로 설정하세요.")
-
-    if any(
-        row["enabled"] and (not row["has_work_id"] or not row["has_upload_url_template"])
-        for row in platform_rows
-    ):
-        next_actions.append("플랫폼 작품 매핑(work_id / 업로드 URL)을 채우세요.")
+    next_actions.extend(readiness_actions)
 
     if publishing_ready and pending_job_count <= 0:
         next_actions.append("업로드 큐에 발행할 회차를 추가하세요.")

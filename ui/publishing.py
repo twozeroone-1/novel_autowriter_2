@@ -7,6 +7,7 @@ import streamlit as st
 from core.platform_clients.base import PlatformError, PlatformWorkMetadata, supports_publish_mode
 from core.platform_clients.munpia import MunpiaClient
 from core.platform_clients.novelpia import NovelpiaClient
+from core.publishing_readiness import build_publishing_readiness_snapshot
 from core.publishing_executor import PublishingExecutor
 from core.publishing_runtime import PublishingRuntime, run_publishing_pass
 from core.publishing_store import PublishingStore
@@ -133,28 +134,12 @@ def build_platform_readiness_rows(
     config: dict,
     credential_loader=load_platform_credentials,
 ) -> list[dict]:
-    rows: list[dict] = []
-    for platform_name in PLATFORM_OPTIONS:
-        platform_config = config.get("platforms", {}).get(platform_name, {})
-        enabled = bool(platform_config.get("enabled", False))
-        credentials = credential_loader(project_name, platform_name) if enabled else {}
-        has_credentials = bool(
-            str(credentials.get("username", "")).strip() and str(credentials.get("password", "")).strip()
-        )
-        has_work_id = bool(str(platform_config.get("work_id", "")).strip())
-        has_upload_url_template = bool(str(platform_config.get("upload_url_template", "")).strip())
-        rows.append(
-            {
-                "platform_name": platform_name,
-                "platform_label": PLATFORM_LABELS[platform_name],
-                "enabled": enabled,
-                "has_credentials": has_credentials,
-                "has_work_id": has_work_id,
-                "has_upload_url_template": has_upload_url_template,
-                "ready": enabled and has_credentials and has_work_id and has_upload_url_template,
-            }
-        )
-    return rows
+    snapshot = build_publishing_readiness_snapshot(
+        project_name=project_name,
+        config=config,
+        credential_loader=credential_loader,
+    )
+    return list(snapshot["platform_rows"])
 
 
 def build_publishing_operations_snapshot(
@@ -166,41 +151,32 @@ def build_publishing_operations_snapshot(
     history: list[dict],
     credential_loader=load_platform_credentials,
 ) -> dict:
-    platform_rows = build_platform_readiness_rows(
+    readiness_snapshot = build_publishing_readiness_snapshot(
         project_name=project_name,
         config=config,
         credential_loader=credential_loader,
     )
-    enabled_rows = [row for row in platform_rows if row["enabled"]]
-    ready_rows = [row for row in enabled_rows if row["ready"]]
-    blockers: list[str] = []
-
-    if not enabled_rows:
-        blockers.append("활성화된 업로드 플랫폼이 없습니다.")
-    if any(row["enabled"] and not row["has_credentials"] for row in platform_rows):
-        blockers.append("플랫폼 계정이 비어 있습니다.")
-    if any(row["enabled"] and not row["has_work_id"] for row in platform_rows):
-        blockers.append("work_id가 비어 있는 플랫폼이 있습니다.")
-    if any(row["enabled"] and not row["has_upload_url_template"] for row in platform_rows):
-        blockers.append("업로드 URL 템플릿이 비어 있는 플랫폼이 있습니다.")
+    platform_rows = readiness_snapshot["platform_rows"]
+    blockers: list[str] = list(readiness_snapshot["blockers"])
 
     runtime_status = format_publishing_runtime_status(runtime)
     runtime_state = str(runtime.get("status", "idle")).strip().lower() or "idle"
     if runtime_state in {"blocked", "paused", "stopped"}:
         blockers.append(f"런타임 상태를 확인하세요: {runtime_status}")
 
-    publishing_ready = bool(enabled_rows) and len(ready_rows) == len(enabled_rows)
     next_actions = _build_publishing_operations_actions(
-        publishing_ready=publishing_ready,
+        publishing_ready=bool(readiness_snapshot["publishing_ready"]),
         runtime_state=runtime_state,
         pending_job_count=count_pending_publishing_jobs(queue),
+        enabled_platform_count=int(readiness_snapshot["enabled_platform_count"]),
+        readiness_actions=list(readiness_snapshot["recommended_actions"]),
     )
 
     return {
         "platform_rows": platform_rows,
-        "publishing_ready": publishing_ready,
-        "enabled_platform_count": len(enabled_rows),
-        "ready_platform_count": len(ready_rows),
+        "publishing_ready": readiness_snapshot["publishing_ready"],
+        "enabled_platform_count": readiness_snapshot["enabled_platform_count"],
+        "ready_platform_count": readiness_snapshot["ready_platform_count"],
         "pending_job_count": count_pending_publishing_jobs(queue),
         "runtime_status": runtime_status,
         "schedule_summary": format_publishing_schedule_summary(config),
@@ -385,19 +361,22 @@ def _build_publishing_operations_actions(
     publishing_ready: bool,
     runtime_state: str,
     pending_job_count: int,
+    enabled_platform_count: int,
+    readiness_actions: list[str],
 ) -> list[str]:
     actions: list[str] = []
-    if not publishing_ready:
+    if not publishing_ready and enabled_platform_count > 0:
         actions.append("플랫폼 계정과 작품 매핑을 먼저 완료하세요.")
-    elif pending_job_count <= 0:
+    actions.extend(readiness_actions)
+    if publishing_ready and pending_job_count <= 0:
         actions.append("업로드 큐에 발행할 회차를 추가하세요.")
-    else:
+    elif publishing_ready:
         actions.append("업로드 큐와 런타임 상태를 확인하세요.")
 
     if runtime_state in {"blocked", "paused", "stopped"}:
         actions.append("마지막 오류를 확인하고 필요하면 수동 개입을 진행하세요.")
 
-    return actions
+    return list(dict.fromkeys(actions))
 
 
 def _render_platform_settings(project_name: str, store: PublishingStore, config: dict, platform_name: str) -> None:

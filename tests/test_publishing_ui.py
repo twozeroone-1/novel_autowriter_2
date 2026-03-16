@@ -3,6 +3,7 @@ import importlib.util
 import sys
 import types
 import unittest
+from unittest.mock import patch
 
 
 def _install_fake_streamlit():
@@ -321,6 +322,43 @@ class TestPublishingUi(unittest.TestCase):
 
         self.assertFalse(snapshot["publishing_ready"])
         self.assertEqual(snapshot["next_actions"][0], "플랫폼 계정과 작품 매핑을 먼저 완료하세요.")
+
+    def test_build_publishing_operations_snapshot_uses_shared_readiness_snapshot(self):
+        module = self._load_module()
+
+        shared_snapshot = {
+            "platform_rows": (
+                {
+                    "platform_name": "munpia",
+                    "platform_label": "문피아",
+                    "enabled": True,
+                    "has_credentials": False,
+                    "has_work_id": False,
+                    "has_upload_url_template": False,
+                    "ready": False,
+                },
+            ),
+            "enabled_platform_count": 1,
+            "ready_platform_count": 0,
+            "publishing_ready": False,
+            "blockers": ("shared blocker",),
+            "recommended_actions": ("shared action",),
+        }
+
+        with patch.object(module, "build_publishing_readiness_snapshot", return_value=shared_snapshot) as mocked_build:
+            snapshot = module.build_publishing_operations_snapshot(
+                project_name="sample",
+                config={"enabled": True, "schedule": {"type": "daily", "time": "21:00"}, "platforms": {}},
+                runtime={"status": "idle", "last_error": ""},
+                queue=[],
+                history=[],
+                credential_loader=lambda _project, _platform: {"username": "", "password": ""},
+            )
+
+        mocked_build.assert_called_once()
+        self.assertEqual(snapshot["platform_rows"], shared_snapshot["platform_rows"])
+        self.assertIn("shared blocker", snapshot["blockers"])
+        self.assertIn("shared action", snapshot["next_actions"])
 
 
 if __name__ == "__main__":
