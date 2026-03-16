@@ -808,6 +808,147 @@ class TestUiHelpers(unittest.TestCase):
         self.assertIn("characters", fake_st.events)
         self.assertIn("diagnostics", fake_st.events)
 
+    def test_render_project_settings_tab_groups_supporting_sections_under_secondary_management(self):
+        class FakeColumn:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeStreamlit:
+            def __init__(self):
+                self.session_state = {}
+                self.events = []
+
+            def header(self, label, *args, **kwargs):
+                self.events.append(f"header:{label}")
+
+            def markdown(self, label, *args, **kwargs):
+                self.events.append(f"markdown:{label}")
+
+            def caption(self, label, *args, **kwargs):
+                self.events.append(f"caption:{label}")
+
+            def success(self, label, *args, **kwargs):
+                self.events.append(f"success:{label}")
+
+            def metric(self, label, value, *args, **kwargs):
+                self.events.append(f"metric:{label}:{value}")
+
+            def divider(self, *args, **kwargs):
+                self.events.append("divider")
+
+            def columns(self, count, *args, **kwargs):
+                if isinstance(count, (list, tuple)):
+                    count = len(count)
+                return [FakeColumn() for _ in range(count)]
+
+            def expander(self, label, *args, **kwargs):
+                self.events.append(f"expander:{label}")
+                return nullcontext()
+
+            def button(self, *args, **kwargs):
+                return False
+
+            def info(self, label, *args, **kwargs):
+                self.events.append(f"info:{label}")
+
+            def warning(self, label, *args, **kwargs):
+                self.events.append(f"warning:{label}")
+
+            def text_area(self, label, *args, **kwargs):
+                self.events.append(f"text_area:{label}")
+                if "value" in kwargs:
+                    return kwargs["value"]
+                key = kwargs.get("key")
+                if key is not None:
+                    return self.session_state.get(key, "")
+                return ""
+
+            def code(self, *args, **kwargs):
+                self.events.append("code")
+
+            def subheader(self, label, *args, **kwargs):
+                self.events.append(f"subheader:{label}")
+
+            def write(self, label, *args, **kwargs):
+                self.events.append(f"write:{label}")
+
+            def dataframe(self, *args, **kwargs):
+                self.events.append("dataframe")
+
+        fake_st = FakeStreamlit()
+
+        class FakeStoryBibleStore:
+            story_bible_path = Path("/tmp/story_bible.json")
+
+        class FakeCanonStore:
+            current_state_path = Path("/tmp/canon.json")
+
+            def load_current_state(self):
+                return {"people": {}, "resources": {}, "hooks": [], "timeline": []}
+
+        class FakeReleasePolicyStore:
+            policy_path = Path("/tmp/release_policy.json")
+
+            def load(self):
+                return {"global": {}, "platforms": {}}
+
+        class FakeContext:
+            def __init__(self):
+                self.story_bible_store = FakeStoryBibleStore()
+                self.canon_store = FakeCanonStore()
+                self.release_policy_store = FakeReleasePolicyStore()
+                self.project_name = "demo"
+
+            def get_workspace_settings(self):
+                return {
+                    "worldview": "filled world",
+                    "tone_and_manner": "concise style",
+                    "continuity": "fixed rule",
+                    "state": "tense state",
+                    "summary_of_previous": "",
+                }
+
+        fake_generator = types.SimpleNamespace(
+            ctx=FakeContext(),
+            chapters_dir=Path("/tmp"),
+            elaborate_worldview=lambda text: text,
+            compress_worldview=lambda text: text,
+            structure_style_guide=lambda text: text,
+            structure_continuity=lambda text: text,
+            summarize_state=lambda text: text,
+            build_summary_update_preview=lambda text: text,
+        )
+        fake_app = types.SimpleNamespace(generator=fake_generator)
+
+        with (
+            patch.object(sys.modules["ui.workspace"], "st", fake_st),
+            patch.object(sys.modules["ui.workspace"], "render_project_text_field", side_effect=lambda *args, **kwargs: args[1].get(args[2].spec.config_key, "")),
+            patch.object(sys.modules["ui.workspace"], "render_structured_store_overview", side_effect=lambda *args, **kwargs: fake_st.events.append("structured_store")),
+            patch.object(sys.modules["ui.workspace"], "render_character_management_panel", side_effect=lambda *args, **kwargs: fake_st.events.append("characters")),
+            patch.object(sys.modules["ui.workspace"], "render_diagnostics_panel", side_effect=lambda *args, **kwargs: fake_st.events.append("diagnostics")),
+            patch.object(sys.modules["ui.workspace"], "find_latest_sample_chapter", return_value=None),
+        ):
+            sys.modules["ui.workspace"].render_project_settings_tab(
+                fake_app,
+                ensure_api_key=lambda: False,
+                run_with_status=lambda *args, **kwargs: None,
+            )
+
+        support_index = next(index for index, event in enumerate(fake_st.events) if event == "expander:2. 보조 관리")
+        summary_index = next(index for index, event in enumerate(fake_st.events) if event.startswith("expander:PREVIOUS SUMMARY"))
+        structured_index = next(index for index, event in enumerate(fake_st.events) if event == "structured_store")
+        characters_index = next(index for index, event in enumerate(fake_st.events) if event == "characters")
+        diagnostics_index = next(index for index, event in enumerate(fake_st.events) if event == "diagnostics")
+
+        self.assertLess(support_index, summary_index)
+        self.assertLess(support_index, structured_index)
+        self.assertLess(support_index, characters_index)
+        self.assertLess(support_index, diagnostics_index)
+        self.assertIn("caption:핵심 4문서 밖의 보조 기준선, 구조화 저장소, 등장인물, 진단은 필요할 때만 여세요.", fake_st.events)
+
 
 if __name__ == "__main__":
     unittest.main()
