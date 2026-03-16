@@ -160,6 +160,101 @@ class TestOperationsDashboard(unittest.TestCase):
         self.assertIn("shared blocker", snapshot["blockers"])
         self.assertIn("shared action", snapshot["next_actions"])
 
+    def test_snapshot_builds_workflow_timeline_for_publishable_episode(self):
+        snapshot = build_operations_overview_snapshot(
+            project_name="sample",
+            workspace_settings={
+                "worldview": "world",
+                "tone_and_manner": "style",
+                "continuity": "rules",
+                "state": "state",
+            },
+            publishing_config={
+                "enabled": True,
+                "schedule": {"type": "daily", "time": "21:00"},
+                "platforms": {
+                    "novelpia": {
+                        "enabled": True,
+                        "work_id": "work-1",
+                        "upload_url_template": "https://example.com/upload/{work_id}",
+                    }
+                },
+            },
+            publishing_runtime={"status": "idle", "last_error": ""},
+            publishing_queue=[{"status": "pending"}],
+            latest_episode_plan={"episode_objective": "목표"},
+            latest_episode={"episode_id": "ep_014", "title": "14화. 후속 조치", "status": "publishable"},
+            latest_quality_report={"status": "publishable"},
+            credential_loader=lambda _project, _platform: {"username": "user", "password": "pass"},
+        )
+
+        self.assertEqual(
+            [step["state"] for step in snapshot["timeline_steps"]],
+            ["완료", "완료", "완료", "완료", "현재", "다음"],
+        )
+
+    def test_snapshot_marks_quality_stage_blocked_for_hard_fail(self):
+        snapshot = build_operations_overview_snapshot(
+            project_name="sample",
+            workspace_settings={
+                "worldview": "world",
+                "tone_and_manner": "style",
+                "continuity": "rules",
+                "state": "state",
+            },
+            publishing_config={
+                "enabled": True,
+                "schedule": {"type": "daily", "time": "21:00"},
+                "platforms": {
+                    "munpia": {
+                        "enabled": True,
+                        "work_id": "work-1",
+                        "upload_url_template": "https://example.com/upload/{work_id}",
+                    }
+                },
+            },
+            publishing_runtime={"status": "idle", "last_error": ""},
+            publishing_queue=[],
+            latest_episode_plan={"episode_objective": "목표"},
+            latest_episode={"episode_id": "ep_013", "title": "13화. 균열", "status": "draft"},
+            latest_quality_report={"status": "hard_fail"},
+            credential_loader=lambda _project, _platform: {"username": "user", "password": "pass"},
+        )
+
+        self.assertEqual(snapshot["timeline_steps"][3]["label"], "품질")
+        self.assertEqual(snapshot["timeline_steps"][3]["state"], "차단")
+
+    def test_snapshot_includes_structured_shortcut_actions(self):
+        snapshot = build_operations_overview_snapshot(
+            project_name="sample",
+            workspace_settings={
+                "worldview": "",
+                "tone_and_manner": "style",
+                "continuity": "rules",
+                "state": "",
+            },
+            publishing_config={
+                "enabled": True,
+                "schedule": {"type": "daily", "time": "21:00"},
+                "platforms": {
+                    "novelpia": {
+                        "enabled": True,
+                        "work_id": "",
+                        "upload_url_template": "",
+                    }
+                },
+            },
+            publishing_runtime={"status": "blocked", "last_error": "quality hard fail"},
+            publishing_queue=[],
+            credential_loader=lambda _project, _platform: {"username": "", "password": ""},
+        )
+
+        shortcut_labels = [action["label"] for action in snapshot["shortcut_actions"]]
+        self.assertIn("프로젝트 통합 설정 열기", shortcut_labels)
+        self.assertIn("회차 워크플로 보기", shortcut_labels)
+        self.assertIn("발행 운영 확인", shortcut_labels)
+        self.assertIn("자동화/진단 확인", shortcut_labels)
+
 
 if __name__ == "__main__":
     unittest.main()

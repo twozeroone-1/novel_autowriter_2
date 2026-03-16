@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import streamlit as st
 
+from core.episode_artifact_store import EpisodeArtifactStore
 from core.platform_credentials import load_platform_credentials
 from core.publishing_readiness import build_publishing_readiness_snapshot
 from core.publishing_store import PublishingStore
+from core.run_snapshot_store import RunSnapshotStore
 from ui.publishing import (
     PLATFORM_LABELS,
     count_pending_publishing_jobs,
@@ -23,6 +25,9 @@ def build_operations_overview_snapshot(
     publishing_config: dict,
     publishing_runtime: dict,
     publishing_queue: list[dict],
+    latest_episode_plan: dict | None = None,
+    latest_episode: dict | None = None,
+    latest_quality_report: dict | None = None,
     credential_loader=load_platform_credentials,
 ) -> dict:
     settings_ready_count = sum(
@@ -57,6 +62,19 @@ def build_operations_overview_snapshot(
         pending_job_count=count_pending_publishing_jobs(publishing_queue),
         runtime_status=runtime_status,
     )
+    timeline_steps = _build_timeline_steps(
+        settings_ready_count=settings_ready_count,
+        latest_episode_plan=latest_episode_plan or {},
+        latest_episode=latest_episode or {},
+        latest_quality_report=latest_quality_report or {},
+        publishing_queue=publishing_queue,
+        publishing_runtime=publishing_runtime,
+    )
+    shortcut_actions = _build_shortcut_actions(
+        settings_ready_count=settings_ready_count,
+        runtime_status=runtime_status,
+        publishing_ready=publishing_ready,
+    )
 
     return {
         "project_name": project_name,
@@ -72,6 +90,8 @@ def build_operations_overview_snapshot(
         "schedule_summary": format_publishing_schedule_summary(publishing_config),
         "blockers": tuple(_dedupe_preserving_order(blockers)),
         "next_actions": tuple(next_actions),
+        "timeline_steps": tuple(timeline_steps),
+        "shortcut_actions": tuple(shortcut_actions),
         "platform_rows": tuple(platform_rows),
     }
 
@@ -80,9 +100,14 @@ def render_operations_overview(app) -> None:
     project_name = app.generator.ctx.project_name
     workspace_settings = app.generator.ctx.get_workspace_settings()
     store = PublishingStore(project_name=project_name)
+    artifact_store = EpisodeArtifactStore(project_name=project_name)
+    snapshot_store = RunSnapshotStore(project_name=project_name)
     publishing_config = store.load_config()
     publishing_runtime = store.load_runtime()
     publishing_queue = store.load_queue()
+    latest_episode_plan = _load_latest_run_json(snapshot_store.runs_dir, "chapter_", "episode_plan.json")
+    latest_quality_report = _load_latest_run_json(snapshot_store.runs_dir, "origin_", "quality_report.json")
+    latest_episode = _select_latest_episode(artifact_store.load_manifest())
 
     snapshot = build_operations_overview_snapshot(
         project_name=project_name,
@@ -90,6 +115,9 @@ def render_operations_overview(app) -> None:
         publishing_config=publishing_config,
         publishing_runtime=publishing_runtime,
         publishing_queue=publishing_queue,
+        latest_episode_plan=latest_episode_plan,
+        latest_episode=latest_episode,
+        latest_quality_report=latest_quality_report,
     )
 
     st.header("운영 개요")
@@ -131,6 +159,19 @@ def render_operations_overview(app) -> None:
     for action in snapshot["next_actions"]:
         st.markdown(f"- {action}")
 
+    st.divider()
+    st.subheader("오늘의 회차 상태 타임라인")
+    timeline_columns = st.columns(len(snapshot["timeline_steps"]))
+    for column, step in zip(timeline_columns, snapshot["timeline_steps"]):
+        with column:
+            st.caption(step["state"])
+            st.markdown(f"**{step['label']}**")
+
+    st.divider()
+    st.subheader("바로가기 액션")
+    for action in snapshot["shortcut_actions"]:
+        st.markdown(f"- **{action['label']}**: {action['description']}")
+
 
 def _build_next_actions(
     *,
@@ -159,6 +200,151 @@ def _build_next_actions(
         next_actions.append("현재 상태는 안정적입니다. 다음 회차 워크플로를 진행하세요.")
 
     return _dedupe_preserving_order(next_actions)
+
+
+def _build_timeline_steps(
+    *,
+    settings_ready_count: int,
+    latest_episode_plan: dict,
+    latest_episode: dict,
+    latest_quality_report: dict,
+    publishing_queue: list[dict],
+    publishing_runtime: dict,
+) -> list[dict]:
+    stage_states = ["대기"] * 6
+    labels = ("설정", "계획", "생성", "품질", "발행", "후속 검증")
+
+    if settings_ready_count >= len(REQUIRED_WORKSPACE_FIELDS):
+        stage_states[0] = "완료"
+    else:
+        stage_states[0] = "현재"
+        return _zip_timeline(labels, stage_states)
+
+    if _has_meaningful_plan(latest_episode_plan):
+        stage_states[1] = "완료"
+    else:
+        stage_states[1] = "현재"
+        return _zip_timeline(labels, stage_states)
+
+    if latest_episode:
+        stage_states[2] = "완료"
+    else:
+        stage_states[2] = "현재"
+        return _zip_timeline(labels, stage_states)
+
+    quality_status = str((latest_quality_report or {}).get("status", "")).strip().lower()
+    if quality_status == "hard_fail":
+        stage_states[3] = "차단"
+        return _zip_timeline(labels, stage_states)
+    if quality_status == "publishable":
+        stage_states[3] = "완료"
+    else:
+        stage_states[3] = "현재"
+        return _zip_timeline(labels, stage_states)
+
+    if count_pending_publishing_jobs(publishing_queue) > 0:
+        stage_states[4] = "현재"
+    else:
+        stage_states[4] = "다음"
+        return _zip_timeline(labels, stage_states)
+
+    runtime_status = str(publishing_runtime.get("status", "idle")).strip().lower()
+    if runtime_status == "scheduled":
+        stage_states[5] = "현재"
+    else:
+        stage_states[5] = "다음"
+    return _zip_timeline(labels, stage_states)
+
+
+def _zip_timeline(labels: tuple[str, ...], states: list[str]) -> list[dict]:
+    return [{"label": label, "state": state} for label, state in zip(labels, states)]
+
+
+def _build_shortcut_actions(
+    *,
+    settings_ready_count: int,
+    runtime_status: str,
+    publishing_ready: bool,
+) -> list[dict]:
+    actions = [
+        {
+            "label": "프로젝트 통합 설정 열기",
+            "description": "STORY_BIBLE, CONTINUITY, STATE 등 핵심 문서를 먼저 점검합니다.",
+        },
+        {
+            "label": "회차 워크플로 보기",
+            "description": "최근 계획, 초안, 품질 게이트, 패키지 상태를 한 번에 확인합니다.",
+        },
+        {
+            "label": "발행 운영 확인",
+            "description": "플랫폼 readiness, 업로드 큐, smoke 결과를 점검합니다.",
+        },
+        {
+            "label": "자동화/진단 확인",
+            "description": "자동화 런타임과 최근 진단 경고를 확인합니다.",
+        },
+    ]
+    if settings_ready_count < len(REQUIRED_WORKSPACE_FIELDS):
+        return actions
+    if runtime_status in {"blocked", "paused", "stopped"} or not publishing_ready:
+        return actions
+    return actions
+
+
+def _has_meaningful_plan(payload: dict) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    if str(payload.get("episode_objective", "")).strip():
+        return True
+    for field in (
+        "must_include_characters",
+        "hooks_to_payoff",
+        "hooks_to_advance",
+        "forbidden_moves",
+        "continuity_focus",
+    ):
+        value = payload.get(field, [])
+        if isinstance(value, list) and any(str(item).strip() for item in value):
+            return True
+    return False
+
+
+def _load_latest_run_json(runs_dir, prefix: str, filename: str) -> dict:
+    if not runs_dir.exists():
+        return {}
+    candidates = sorted(
+        (
+            path
+            for path in runs_dir.iterdir()
+            if path.is_dir() and path.name.startswith(prefix) and (path / filename).exists()
+        ),
+        key=lambda path: path.name,
+        reverse=True,
+    )
+    if not candidates:
+        return {}
+    target = candidates[0] / filename
+    try:
+        import json
+
+        payload = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _select_latest_episode(manifest: dict) -> dict:
+    episodes = manifest.get("episodes", {}) if isinstance(manifest, dict) else {}
+    candidates = [payload for payload in episodes.values() if isinstance(payload, dict)]
+    if not candidates:
+        return {}
+    return max(
+        candidates,
+        key=lambda payload: (
+            int(payload.get("sequence", 0) or 0),
+            str(payload.get("episode_id", "")),
+        ),
+    )
 
 
 def _dedupe_preserving_order(values: list[str]) -> list[str]:
