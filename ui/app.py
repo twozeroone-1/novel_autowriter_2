@@ -19,6 +19,7 @@ from ui.chapters import (
     render_review_tab,
     run_with_status,
 )
+from ui.episode_workflow import render_episode_workflow
 from ui.operations_dashboard import render_operations_overview
 from ui.planning import (
     render_idea_tab as render_idea_tab_panel,
@@ -138,6 +139,7 @@ PROJECT_STATE_KEYS = [
 ]
 PROJECT_TAB_LABELS = (
     "운영 개요",
+    "회차 워크플로",
     "[1] 프로젝트 통합 설정",
     "[2] 회차 생성",
     "[3] 원고 검수",
@@ -317,30 +319,32 @@ def main() -> None:
     st.title(f"AI 소설 스튜디오 - [{current_project}]")
     st.markdown("현재 선택한 작품 환경에서 설정 관리, 회차 생성, 검수, 아이디어와 플롯 설계를 진행합니다.")
 
-    tab0, tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(PROJECT_TAB_LABELS)
+    tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(PROJECT_TAB_LABELS)
 
     with tab0:
         render_operations_overview(app)
 
     with tab1:
-        render_project_settings_hub(app)
+        render_episode_workflow(app)
 
     with tab2:
-        render_generation_tab(app)
+        render_project_settings_hub(app)
 
     with tab3:
-        render_review_tab(app)
+        render_generation_tab(app)
 
     with tab4:
-        render_auto_mode_tab(app)
+        render_review_tab(app)
 
     with tab5:
-        render_automation_tab(app)
+        render_auto_mode_tab(app)
 
     with tab6:
+        render_automation_tab(app)
+
+    with tab7:
         render_publishing_tab(app)
 
 
 if __name__ == "__main__":
     main()
-
