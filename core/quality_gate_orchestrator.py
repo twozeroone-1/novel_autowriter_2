@@ -14,11 +14,21 @@ def _merge_repaired_source(source_payload: dict, repaired_source: dict) -> dict:
     return merged
 
 
+def _normalize_result_source(source_payload: dict) -> dict:
+    normalized: dict = {}
+    for key, value in deepcopy(source_payload).items():
+        if hasattr(value, "__fspath__"):
+            normalized[key] = str(value)
+        else:
+            normalized[key] = value
+    return normalized
+
+
 def _build_publishable_result(*, final_source: dict, gate_reports: dict, attempted_repair: bool) -> dict:
     return {
         "status": "publishable",
         "attempted_repair": attempted_repair,
-        "final_source": final_source,
+        "final_source": _normalize_result_source(final_source),
         "gate_reports": gate_reports,
         "errors": [],
         "repair_summary": {
@@ -47,7 +57,7 @@ def _build_hard_fail_result(
     return {
         "status": "hard_fail",
         "attempted_repair": attempted_repair,
-        "final_source": final_source,
+        "final_source": _normalize_result_source(final_source),
         "gate_reports": gate_reports,
         "errors": errors,
         "repair_summary": {
