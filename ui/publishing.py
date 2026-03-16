@@ -79,6 +79,8 @@ def format_publishing_runtime_status(runtime: dict) -> str:
     error = str(runtime.get("last_error", "")).strip()
     if status == "running":
         return "실행 중"
+    if status == "scheduled":
+        return f"예약 대기: {error}" if error else "예약 대기"
     if status == "cooldown":
         return f"쿨다운: {error}" if error else "쿨다운"
     if status == "blocked":
@@ -107,7 +109,7 @@ def summarize_selected_platforms(targets: dict) -> str:
 
 
 def count_pending_publishing_jobs(queue: list[dict]) -> int:
-    return sum(1 for job in queue if job.get("status") in {"pending", "partial_failed"})
+    return sum(1 for job in queue if job.get("status") in {"pending", "partial_failed", "scheduled"})
 
 
 def build_publishing_queue_rows(queue: list[dict]) -> list[dict]:
@@ -128,18 +130,19 @@ def build_publishing_queue_rows(queue: list[dict]) -> list[dict]:
 def build_publishing_history_rows(history: list[dict]) -> list[dict]:
     rows: list[dict] = []
     for record in history:
+        platform_results = record.get("platform_results", {})
         rows.append(
             {
                 "시간": record.get("timestamp", ""),
                 "회차": record.get("chapter_title", ""),
-                "결과": "성공" if record.get("success") else "실패",
+                "결과": _format_history_result(record),
                 "플랫폼": summarize_selected_platforms(
                     {
                         platform_name: {"selected": True}
-                        for platform_name in record.get("platform_results", {}).keys()
+                        for platform_name in platform_results.keys()
                     }
                 ),
-                "오류": _extract_history_error(record.get("platform_results", {})),
+                "오류": _extract_history_error(platform_results),
             }
         )
     return rows
@@ -732,3 +735,21 @@ def _extract_history_error(platform_results: dict) -> str:
         if error_text:
             return error_text
     return ""
+
+
+def _format_history_result(record: dict) -> str:
+    if record.get("success"):
+        return "성공"
+    if _has_scheduled_platform_result(record.get("platform_results", {})):
+        return "예약"
+    return "실패"
+
+
+def _has_scheduled_platform_result(platform_results: dict) -> bool:
+    for payload in platform_results.values():
+        if not isinstance(payload, dict):
+            continue
+        status = str(payload.get("status", "")).strip().lower()
+        if status == "scheduled":
+            return True
+    return False

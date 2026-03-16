@@ -122,6 +122,17 @@ class TestPublishingUi(unittest.TestCase):
 
         self.assertEqual(status, "중단됨: quality incidents reached threshold")
 
+    def test_format_publishing_runtime_status_reports_scheduled_waiting(self):
+        module = self._load_module()
+        runtime = {
+            "status": "scheduled",
+            "last_error": "",
+        }
+
+        status = module.format_publishing_runtime_status(runtime)
+
+        self.assertEqual(status, "예약 대기")
+
     def test_build_publishing_history_summary_counts_total_success_and_failure(self):
         module = self._load_module()
 
@@ -156,11 +167,31 @@ class TestPublishingUi(unittest.TestCase):
             [
                 {"status": "pending"},
                 {"status": "partial_failed"},
+                {"status": "scheduled"},
                 {"status": "done"},
             ]
         )
 
-        self.assertEqual(count, 2)
+        self.assertEqual(count, 3)
+
+    def test_build_publishing_queue_rows_preserves_scheduled_status(self):
+        module = self._load_module()
+
+        rows = module.build_publishing_queue_rows(
+            [
+                {
+                    "chapter_title": "Episode 21",
+                    "status": "scheduled",
+                    "attempt_count": 1,
+                    "targets": {
+                        "novelpia": {"selected": True},
+                    },
+                }
+            ]
+        )
+
+        self.assertEqual(rows[0]["상태"], "scheduled")
+        self.assertEqual(rows[0]["대상"], "노벨피아")
 
     def test_build_publishing_history_rows_formats_platform_summary(self):
         module = self._load_module()
@@ -181,6 +212,24 @@ class TestPublishingUi(unittest.TestCase):
 
         self.assertEqual(rows[0]["결과"], "실패")
         self.assertEqual(rows[0]["플랫폼"], "문피아, 노벨피아")
+
+    def test_build_publishing_history_rows_labels_scheduled_results(self):
+        module = self._load_module()
+
+        rows = module.build_publishing_history_rows(
+            [
+                {
+                    "timestamp": "2026-03-16T22:00:00+09:00",
+                    "chapter_title": "Episode 20",
+                    "success": False,
+                    "platform_results": {
+                        "novelpia": {"status": "scheduled", "success": True},
+                    },
+                }
+            ]
+        )
+
+        self.assertEqual(rows[0]["결과"], "예약")
 
 
 if __name__ == "__main__":
