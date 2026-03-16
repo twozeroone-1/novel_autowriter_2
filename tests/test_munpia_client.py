@@ -43,6 +43,10 @@ class FakeBrowserSession:
         self.actions.append(("wait_for_url_change", previous_url, str(timeout_ms)))
         return self.current_url != previous_url
 
+    def has_selector(self, selector: str, timeout_ms: int = 0) -> bool:
+        self.actions.append(("has_selector", selector, str(timeout_ms)))
+        return selector in self.present_selectors
+
     def close(self) -> None:
         self.actions.append(("close", "", ""))
 
@@ -287,6 +291,37 @@ class TestMunpiaClient(unittest.TestCase):
         from core.platform_clients.munpia import MunpiaClient
 
         self.assertEqual(MunpiaClient.supported_publish_modes(), ("immediate",))
+
+    def test_smoke_check_editor_succeeds_when_required_fields_exist(self):
+        from core.platform_clients.munpia import MunpiaClient
+
+        browser = FakeBrowserSession(
+            present_selectors={
+                "input[class*='textfield-module_textfield']",
+                "#novelWriteText",
+            }
+        )
+        client = MunpiaClient(
+            username="writer-id",
+            password="secret",
+            browser_session=browser,
+            platform_config={
+                "upload_url_template": "https://munpia.test/work/{work_id}/episode/new",
+            },
+        )
+
+        result = client.smoke_check_editor("work-1")
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.work_id, "work-1")
+        self.assertEqual(
+            browser.actions[:3],
+            [
+                ("goto", "https://munpia.test/work/work-1/episode/new", ""),
+                ("has_selector", "input[class*='textfield-module_textfield']", "3000"),
+                ("has_selector", "#novelWriteText", "3000"),
+            ],
+        )
 
     def test_verify_publication_succeeds_for_completed_episode_url(self):
         from core.platform_clients.munpia import MunpiaClient

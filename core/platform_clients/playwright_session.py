@@ -5,7 +5,6 @@ try:
 except ModuleNotFoundError:
     sync_playwright = None
 
-
 class PlaywrightBrowserSession:
     def __init__(self, *, headless: bool = True):
         if sync_playwright is None:
@@ -76,6 +75,14 @@ class PlaywrightBrowserSession:
 
     def content(self) -> str:
         return self._page.content()
+
+    def has_selector(self, selector: str, timeout_ms: int = 0) -> bool:
+        locator = self._page.locator(selector).first
+        try:
+            locator.wait_for(state="attached", timeout=timeout_ms)
+        except Exception:
+            return False
+        return True
 
     def close(self) -> None:
         self._browser.close()

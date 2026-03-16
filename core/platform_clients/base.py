@@ -70,6 +70,10 @@ class BasePlatformClient(ABC):
     def verify_publication(self, expected: dict) -> PlatformActionResult:
         raise NotImplementedError
 
+    @abstractmethod
+    def smoke_check_editor(self, work_id: str) -> PlatformActionResult:
+        raise NotImplementedError
+
 
 def supported_publish_modes(client_class: type[BasePlatformClient]) -> tuple[str, ...]:
     return client_class.supported_publish_modes()

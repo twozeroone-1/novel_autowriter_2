@@ -57,6 +57,10 @@ class FakeBrowserSession:
         self.actions.append(("content", self.current_url, ""))
         return self.page_contents.get(self.current_url, "")
 
+    def has_selector(self, selector: str, timeout_ms: int = 0) -> bool:
+        self.actions.append(("has_selector", selector, str(timeout_ms)))
+        return selector in self.present_selectors
+
     def close(self) -> None:
         self.actions.append(("close", "", ""))
 
@@ -501,6 +505,39 @@ class TestNovelpiaClient(unittest.TestCase):
         from core.platform_clients.novelpia import NovelpiaClient
 
         self.assertEqual(NovelpiaClient.supported_publish_modes(), ("immediate", "reserved"))
+
+    def test_smoke_check_editor_succeeds_when_required_fields_exist(self):
+        from core.platform_clients.novelpia import NovelpiaClient
+
+        browser = FakeBrowserSession(
+            present_selectors={
+                "#content_subject",
+                ".note-editable",
+                "#content_cate",
+            }
+        )
+        client = NovelpiaClient(
+            username="writer-id",
+            password="secret",
+            browser_session=browser,
+            platform_config={
+                "upload_url_template": "https://novelpia.com/mynovel/all/write/{work_id}",
+            },
+        )
+
+        result = client.smoke_check_editor("416704")
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.work_id, "416704")
+        self.assertEqual(
+            browser.actions[:4],
+            [
+                ("goto", "https://novelpia.com/mynovel/all/write/416704", ""),
+                ("has_selector", "#content_subject", "3000"),
+                ("has_selector", ".note-editable", "3000"),
+                ("has_selector", "#content_cate", "3000"),
+            ],
+        )
 
     def test_upload_episode_uses_pending_publish_options_for_private_visibility(self):
         from core.platform_clients.novelpia import NovelpiaClient

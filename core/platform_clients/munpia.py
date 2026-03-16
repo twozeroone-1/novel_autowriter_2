@@ -151,6 +151,37 @@ class MunpiaClient(BasePlatformClient):
             episode_id=episode_id or _extract_episode_id(current_url),
         )
 
+    def smoke_check_editor(self, work_id: str) -> PlatformActionResult:
+        normalized_work_id = str(work_id).strip()
+        if not normalized_work_id:
+            raise PlatformError("Munpia work ID is required for smoke check.", error_type="requires_user_action")
+
+        upload_url_template = str(self.platform_config.get("upload_url_template", "")).strip()
+        if not upload_url_template:
+            raise PlatformError("Munpia upload URL template is not configured.", error_type="requires_user_action")
+
+        browser = self._get_browser()
+        selectors = self._selectors()
+        editor_url = upload_url_template.format(work_id=normalized_work_id)
+        try:
+            browser.goto(editor_url)
+            required_selectors = (
+                selectors["episode_title"],
+                selectors["episode_body"],
+            )
+            for selector in required_selectors:
+                if not hasattr(browser, "has_selector") or not browser.has_selector(selector, timeout_ms=3000):
+                    raise PlatformError(
+                        f"Munpia smoke check could not find required editor selector: {selector}",
+                        error_type="retryable",
+                    )
+        except Exception as exc:
+            if isinstance(exc, PlatformError):
+                raise
+            raise self._classify_browser_error(exc) from exc
+
+        return PlatformActionResult(status="done", success=True, work_id=normalized_work_id)
+
     def close(self) -> None:
         if self._browser_session is not None:
             self._browser_session.close()
