@@ -19,6 +19,7 @@ from ui.chapters import (
     render_review_tab,
     run_with_status,
 )
+from ui.operations_dashboard import render_operations_overview
 from ui.planning import (
     render_idea_tab as render_idea_tab_panel,
     render_plot_tab as render_plot_tab_panel,
@@ -136,6 +137,7 @@ PROJECT_STATE_KEYS = [
     "delete_project_confirm",
 ]
 PROJECT_TAB_LABELS = (
+    "운영 개요",
     "[1] 프로젝트 통합 설정",
     "[2] 회차 생성",
     "[3] 원고 검수",
@@ -315,7 +317,10 @@ def main() -> None:
     st.title(f"AI 소설 스튜디오 - [{current_project}]")
     st.markdown("현재 선택한 작품 환경에서 설정 관리, 회차 생성, 검수, 아이디어와 플롯 설계를 진행합니다.")
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(PROJECT_TAB_LABELS)
+    tab0, tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(PROJECT_TAB_LABELS)
+
+    with tab0:
+        render_operations_overview(app)
 
     with tab1:
         render_project_settings_hub(app)

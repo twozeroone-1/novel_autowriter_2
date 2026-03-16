@@ -374,6 +374,7 @@ class TestUiHelpers(unittest.TestCase):
         self.assertEqual(
             PROJECT_TAB_LABELS,
             (
+                "운영 개요",
                 "[1] 프로젝트 통합 설정",
                 "[2] 회차 생성",
                 "[3] 원고 검수",
