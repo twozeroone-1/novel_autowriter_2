@@ -16,8 +16,10 @@ DEFAULT_STORY_BIBLE_SHADOW = {
     "tone_and_manner": "여기에 문체(STYLE_GUIDE) 지침을 작성해 주세요.",
     "continuity": "여기에 절대 변경 불가 룰, 연표, 관계도(CONTINUITY)를 작성하세요.",
 }
+# Primary public defaults for Story Bible-only settings.
+DEFAULT_STORY_BIBLE_SETTINGS = DEFAULT_STORY_BIBLE_SHADOW
 # Backward-compatible alias for existing tests and callers.
-DEFAULT_CONFIG = DEFAULT_STORY_BIBLE_SHADOW
+DEFAULT_CONFIG = DEFAULT_STORY_BIBLE_SETTINGS
 
 
 class ContextManager:
@@ -277,16 +279,22 @@ class ContextManager:
             lines.append(f"- {char['name']} ({char['role']}): {char['description']} (특징: {traits})")
         return "\n".join(lines)
 
-    def get_config(self) -> dict:
+    def get_story_bible_settings(self) -> dict:
         return self._build_story_bible_compatibility_view(self._load_story_bible_shadow_payload())
+
+    def get_config(self) -> dict:
+        return self.get_story_bible_settings()
 
     def get_workspace_settings(self) -> dict:
         story_bible_fields = self._get_story_bible_prompt_fields()
         state_snapshot = self._get_state_snapshot()
         return {
-            "worldview": story_bible_fields.get("worldview", DEFAULT_CONFIG["worldview"]),
-            "tone_and_manner": story_bible_fields.get("tone_and_manner", DEFAULT_CONFIG["tone_and_manner"]),
-            "continuity": story_bible_fields.get("continuity", DEFAULT_CONFIG["continuity"]),
+            "worldview": story_bible_fields.get("worldview", DEFAULT_STORY_BIBLE_SETTINGS["worldview"]),
+            "tone_and_manner": story_bible_fields.get(
+                "tone_and_manner",
+                DEFAULT_STORY_BIBLE_SETTINGS["tone_and_manner"],
+            ),
+            "continuity": story_bible_fields.get("continuity", DEFAULT_STORY_BIBLE_SETTINGS["continuity"]),
             "state": state_snapshot.get("state", DEFAULT_CONTEXT_STATE["state"]),
             "summary_of_previous": state_snapshot.get(
                 "summary_of_previous",
@@ -299,17 +307,13 @@ class ContextManager:
 
     def save_config(self, config_data: dict) -> None:
         normalized = self._normalize_story_bible_shadow_payload(config_data)
-        self._write_story_bible_shadow(
-            worldview=normalized.get("worldview", DEFAULT_CONFIG["worldview"]),
-            tone_and_manner=normalized.get("tone_and_manner", DEFAULT_CONFIG["tone_and_manner"]),
-            continuity=normalized.get("continuity", DEFAULT_CONFIG["continuity"]),
-        )
-        self.story_bible_store.save(
-            {
-                "worldview": normalized.get("worldview", DEFAULT_CONFIG["worldview"]),
-                "style_guide": normalized.get("tone_and_manner", DEFAULT_CONFIG["tone_and_manner"]),
-                "fixed_rules": normalized.get("continuity", DEFAULT_CONFIG["continuity"]),
-            }
+        self.save_story_bible_sections(
+            worldview=normalized.get("worldview", DEFAULT_STORY_BIBLE_SETTINGS["worldview"]),
+            tone_and_manner=normalized.get(
+                "tone_and_manner",
+                DEFAULT_STORY_BIBLE_SETTINGS["tone_and_manner"],
+            ),
+            continuity=normalized.get("continuity", DEFAULT_STORY_BIBLE_SETTINGS["continuity"]),
         )
 
     def save_story_bible_sections(
@@ -410,8 +414,11 @@ class ContextManager:
         workspace_settings = self.get_workspace_settings()
         self.save_story_bible_sections(
             worldview=str(new_worldview),
-            tone_and_manner=workspace_settings.get("tone_and_manner", DEFAULT_CONFIG["tone_and_manner"]),
-            continuity=workspace_settings.get("continuity", DEFAULT_CONFIG["continuity"]),
+            tone_and_manner=workspace_settings.get(
+                "tone_and_manner",
+                DEFAULT_STORY_BIBLE_SETTINGS["tone_and_manner"],
+            ),
+            continuity=workspace_settings.get("continuity", DEFAULT_STORY_BIBLE_SETTINGS["continuity"]),
         )
 
     def get_plot_outline(self) -> str:

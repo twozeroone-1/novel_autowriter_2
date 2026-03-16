@@ -26,7 +26,7 @@ class TestContextManager(unittest.TestCase):
             BASE_DATA_DIR=base,
         )
 
-    def test_get_config_normalizes_missing_and_non_string_values(self):
+    def test_get_story_bible_settings_normalize_missing_and_non_string_values(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
                 story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
@@ -34,13 +34,16 @@ class TestContextManager(unittest.TestCase):
                 manager = ContextManager(project_name="sample")
                 manager.config_path.write_text('{"worldview": 123, "state": null}', encoding="utf-8")
 
-                config = manager.get_config()
+                settings = manager.get_story_bible_settings()
                 workspace_settings = manager.get_workspace_settings()
 
-                self.assertEqual(config["worldview"], "123")
-                self.assertEqual(config["tone_and_manner"], context_module.DEFAULT_CONFIG["tone_and_manner"])
-                self.assertNotIn("state", config)
-                self.assertNotIn("summary_of_previous", config)
+                self.assertEqual(settings["worldview"], "123")
+                self.assertEqual(
+                    settings["tone_and_manner"],
+                    context_module.DEFAULT_STORY_BIBLE_SETTINGS["tone_and_manner"],
+                )
+                self.assertNotIn("state", settings)
+                self.assertNotIn("summary_of_previous", settings)
                 self.assertEqual(workspace_settings["state"], context_state_store_module.DEFAULT_CONTEXT_STATE["state"])
                 self.assertEqual(
                     workspace_settings["summary_of_previous"],
@@ -103,12 +106,7 @@ class TestContextManager(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)):
                 manager = ContextManager(project_name="sample")
-                manager.save_config(
-                    {
-                        **context_module.DEFAULT_CONFIG,
-                        "summary_of_previous": "existing summary",
-                    }
-                )
+                manager.save_previous_summary("existing summary")
                 expected_summary = manager.build_updated_summary_text("new summary")
 
                 with patch.object(manager, "save_previous_summary") as save_previous_summary, patch.object(
@@ -184,7 +182,7 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(workspace_settings["state"], "old state")
                 self.assertEqual(workspace_settings["summary_of_previous"], "new summary")
 
-    def test_get_config_reads_story_bible_fields_from_structured_store(self):
+    def test_get_story_bible_settings_read_story_bible_fields_from_structured_store(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
                 story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
@@ -200,13 +198,50 @@ class TestContextManager(unittest.TestCase):
                 )
                 manager = ContextManager(project_name="sample")
 
-                config = manager.get_config()
+                settings = manager.get_story_bible_settings()
 
-                self.assertEqual(config["worldview"], "structured world")
-                self.assertEqual(config["tone_and_manner"], "structured style")
-                self.assertEqual(config["continuity"], "structured rules")
+                self.assertEqual(settings["worldview"], "structured world")
+                self.assertEqual(settings["tone_and_manner"], "structured style")
+                self.assertEqual(settings["continuity"], "structured rules")
 
-    def test_get_config_does_not_expose_state_fields(self):
+    def test_get_story_bible_settings_returns_story_bible_compatibility_view(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ):
+                manager = ContextManager(project_name="sample")
+                manager.save_story_bible_sections(
+                    worldview="structured world",
+                    tone_and_manner="structured style",
+                    continuity="structured rules",
+                )
+
+                settings = manager.get_story_bible_settings()
+
+                self.assertEqual(
+                    settings,
+                    {
+                        "worldview": "structured world",
+                        "tone_and_manner": "structured style",
+                        "continuity": "structured rules",
+                    },
+                )
+
+    def test_get_config_alias_matches_story_bible_settings(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ):
+                manager = ContextManager(project_name="sample")
+                manager.save_story_bible_sections(
+                    worldview="structured world",
+                    tone_and_manner="structured style",
+                    continuity="structured rules",
+                )
+
+                self.assertEqual(manager.get_config(), manager.get_story_bible_settings())
+
+    def test_get_story_bible_settings_do_not_expose_state_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
                 context_state_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
@@ -215,10 +250,10 @@ class TestContextManager(unittest.TestCase):
                 manager.save_state("stored state")
                 manager.save_previous_summary("stored summary")
 
-                config = manager.get_config()
+                settings = manager.get_story_bible_settings()
 
-                self.assertNotIn("state", config)
-                self.assertNotIn("summary_of_previous", config)
+                self.assertNotIn("state", settings)
+                self.assertNotIn("summary_of_previous", settings)
 
     def test_get_workspace_settings_includes_state_fields_from_context_state_store(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -335,7 +370,7 @@ class TestContextManager(unittest.TestCase):
                 manager.config_path.write_text(
                     json.dumps(
                         {
-                            **context_module.DEFAULT_CONFIG,
+                            **context_module.DEFAULT_STORY_BIBLE_SETTINGS,
                             "state": "legacy state",
                             "summary_of_previous": "legacy summary",
                         },
@@ -364,7 +399,7 @@ class TestContextManager(unittest.TestCase):
                 manager.config_path.write_text(
                     json.dumps(
                         {
-                            **context_module.DEFAULT_CONFIG,
+                            **context_module.DEFAULT_STORY_BIBLE_SETTINGS,
                             "state": "legacy state",
                             "summary_of_previous": "legacy summary",
                         },
@@ -409,7 +444,7 @@ class TestContextManager(unittest.TestCase):
                 manager.config_path.write_text(
                     json.dumps(
                         {
-                            **context_module.DEFAULT_CONFIG,
+                            **context_module.DEFAULT_STORY_BIBLE_SETTINGS,
                             "worldview": "legacy world",
                             "tone_and_manner": "legacy style",
                             "continuity": "legacy rules",
@@ -437,7 +472,7 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(workspace_settings["state"], "legacy state")
                 self.assertEqual(workspace_settings["summary_of_previous"], "legacy summary")
 
-    def test_get_config_does_not_expose_plot_fields(self):
+    def test_get_story_bible_settings_do_not_expose_plot_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
                 plot_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
@@ -445,10 +480,10 @@ class TestContextManager(unittest.TestCase):
                 manager = ContextManager(project_name="sample")
                 manager.save_plot_outline("stored plot")
 
-                config = manager.get_config()
+                settings = manager.get_story_bible_settings()
 
-                self.assertNotIn("plot_outline", config)
-                self.assertNotIn("plot_version", config)
+                self.assertNotIn("plot_outline", settings)
+                self.assertNotIn("plot_version", settings)
 
     def test_save_story_bible_sections_updates_story_bible_store_and_legacy_config(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -464,14 +499,14 @@ class TestContextManager(unittest.TestCase):
                 )
 
                 story_bible = StoryBibleStore(project_name="sample").load()
-                config = manager.get_config()
+                settings = manager.get_story_bible_settings()
 
                 self.assertEqual(story_bible["worldview"], "new world")
                 self.assertEqual(story_bible["style_guide"], "new style")
                 self.assertEqual(story_bible["fixed_rules"], "new rules")
-                self.assertEqual(config["worldview"], "new world")
-                self.assertEqual(config["tone_and_manner"], "new style")
-                self.assertEqual(config["continuity"], "new rules")
+                self.assertEqual(settings["worldview"], "new world")
+                self.assertEqual(settings["tone_and_manner"], "new style")
+                self.assertEqual(settings["continuity"], "new rules")
 
     def test_new_project_config_initializes_story_bible_shadow_only(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -480,7 +515,7 @@ class TestContextManager(unittest.TestCase):
 
                 config_payload = json.loads(manager.config_path.read_text(encoding="utf-8"))
 
-                self.assertEqual(config_payload, context_module.DEFAULT_CONFIG)
+                self.assertEqual(config_payload, context_module.DEFAULT_STORY_BIBLE_SETTINGS)
                 self.assertNotIn("state", config_payload)
                 self.assertNotIn("summary_of_previous", config_payload)
                 self.assertNotIn("plot_outline", config_payload)
@@ -523,7 +558,7 @@ class TestContextManager(unittest.TestCase):
                 manager.config_path.write_text(
                     json.dumps(
                         {
-                            **context_module.DEFAULT_CONFIG,
+                            **context_module.DEFAULT_STORY_BIBLE_SETTINGS,
                             "state": "legacy state",
                             "summary_of_previous": "legacy summary",
                             "plot_outline": "legacy plot",
@@ -578,13 +613,13 @@ class TestContextManager(unittest.TestCase):
                     continuity="existing rules",
                 )
                 story_bible = StoryBibleStore(project_name="sample").load()
-                config = manager.get_config()
+                settings = manager.get_story_bible_settings()
                 self.assertEqual(story_bible["worldview"], "new world")
                 self.assertEqual(story_bible["style_guide"], "existing style")
                 self.assertEqual(story_bible["fixed_rules"], "existing rules")
-                self.assertEqual(config["worldview"], "new world")
-                self.assertEqual(config["tone_and_manner"], "existing style")
-                self.assertEqual(config["continuity"], "existing rules")
+                self.assertEqual(settings["worldview"], "new world")
+                self.assertEqual(settings["tone_and_manner"], "existing style")
+                self.assertEqual(settings["continuity"], "existing rules")
 
     def test_get_plot_outline_prefers_plot_store_over_legacy_config(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -595,7 +630,7 @@ class TestContextManager(unittest.TestCase):
                 manager.config_path.write_text(
                     json.dumps(
                         {
-                            **context_module.DEFAULT_CONFIG,
+                            **context_module.DEFAULT_STORY_BIBLE_SETTINGS,
                             "plot_outline": "legacy plot",
                             "plot_version": "2",
                         },
@@ -623,7 +658,7 @@ class TestContextManager(unittest.TestCase):
                 manager.config_path.write_text(
                     json.dumps(
                         {
-                            **context_module.DEFAULT_CONFIG,
+                            **context_module.DEFAULT_STORY_BIBLE_SETTINGS,
                             "plot_outline": "legacy plot",
                             "plot_version": "2",
                         },
@@ -655,12 +690,12 @@ class TestContextManager(unittest.TestCase):
                     }
                 )
 
-                config = manager.get_config()
+                settings = manager.get_story_bible_settings()
                 plot_payload = PlotStore(project_name="sample").load()
 
-                self.assertEqual(config["worldview"], "new world")
-                self.assertNotIn("plot_outline", config)
-                self.assertNotIn("plot_version", config)
+                self.assertEqual(settings["worldview"], "new world")
+                self.assertNotIn("plot_outline", settings)
+                self.assertNotIn("plot_version", settings)
                 self.assertEqual(plot_payload["plot_outline"], "stored plot")
                 self.assertEqual(plot_payload["plot_version"], "1")
 
@@ -695,6 +730,31 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(story_bible["style_guide"], "new style")
                 self.assertEqual(story_bible["fixed_rules"], "new rules")
 
+    def test_save_config_delegates_to_save_story_bible_sections(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)):
+                manager = ContextManager(project_name="sample")
+
+                with patch.object(
+                    manager,
+                    "save_story_bible_sections",
+                    wraps=manager.save_story_bible_sections,
+                ) as save_story_bible_sections:
+                    manager.save_config(
+                        {
+                            **context_module.DEFAULT_CONFIG,
+                            "worldview": "new world",
+                            "tone_and_manner": "new style",
+                            "continuity": "new rules",
+                        }
+                    )
+
+                save_story_bible_sections.assert_called_once_with(
+                    worldview="new world",
+                    tone_and_manner="new style",
+                    continuity="new rules",
+                )
+
     def test_save_config_ignores_state_fields_and_preserves_existing_context_state_store_value(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
@@ -715,14 +775,14 @@ class TestContextManager(unittest.TestCase):
                     }
                 )
 
-                config = manager.get_config()
+                settings = manager.get_story_bible_settings()
                 workspace_settings = manager.get_workspace_settings()
                 state_payload = ContextStateStore(project_name="sample").load()
                 legacy_config = json.loads(manager.config_path.read_text(encoding="utf-8"))
 
-                self.assertEqual(config["worldview"], "new world")
-                self.assertNotIn("state", config)
-                self.assertNotIn("summary_of_previous", config)
+                self.assertEqual(settings["worldview"], "new world")
+                self.assertNotIn("state", settings)
+                self.assertNotIn("summary_of_previous", settings)
                 self.assertEqual(workspace_settings["state"], "stored state")
                 self.assertEqual(workspace_settings["summary_of_previous"], "stored summary")
                 self.assertEqual(state_payload["state"], "stored state")
@@ -764,7 +824,7 @@ class TestContextManager(unittest.TestCase):
                 manager.config_path.write_text(
                     json.dumps(
                         {
-                            **context_module.DEFAULT_CONFIG,
+                            **context_module.DEFAULT_STORY_BIBLE_SETTINGS,
                             "plot_outline": "legacy plot",
                             "plot_version": "2",
                         },
@@ -803,12 +863,12 @@ class TestContextManager(unittest.TestCase):
                 manager.save_state("next confrontation is unavoidable")
                 manager.save_previous_summary("the hero escaped with the contract")
 
-                config = manager.get_config()
+                settings = manager.get_story_bible_settings()
                 workspace_settings = manager.get_workspace_settings()
                 story_bible = StoryBibleStore(project_name="sample").load()
 
-                self.assertNotIn("state", config)
-                self.assertNotIn("summary_of_previous", config)
+                self.assertNotIn("state", settings)
+                self.assertNotIn("summary_of_previous", settings)
                 self.assertEqual(workspace_settings["state"], "next confrontation is unavoidable")
                 self.assertEqual(workspace_settings["summary_of_previous"], "the hero escaped with the contract")
                 self.assertEqual(story_bible["worldview"], "fixed world")
