@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import streamlit as st
 
+from core.munpia_session_launcher import build_bootstrap_command, launch_bootstrap_terminal
 from core.platform_clients.base import PlatformError, PlatformWorkMetadata, supports_publish_mode
 from core.platform_clients.munpia import MunpiaClient
 from core.platform_clients.novelpia import NovelpiaClient
@@ -11,6 +12,7 @@ from core.publishing_readiness import build_publishing_readiness_snapshot
 from core.publishing_executor import PublishingExecutor
 from core.publishing_runtime import PublishingRuntime, run_publishing_pass
 from core.publishing_store import PublishingStore
+from core.platform_session_store import PlatformSessionStore
 from core.platform_credentials import (
     load_platform_credentials,
     save_platform_credentials,
@@ -156,6 +158,7 @@ def build_publishing_operations_snapshot(
         config=config,
         credential_loader=credential_loader,
     )
+    munpia_session_snapshot = build_munpia_session_snapshot(project_name=project_name)
     platform_rows = readiness_snapshot["platform_rows"]
     blockers: list[str] = list(readiness_snapshot["blockers"])
 
@@ -170,10 +173,13 @@ def build_publishing_operations_snapshot(
         pending_job_count=count_pending_publishing_jobs(queue),
         enabled_platform_count=int(readiness_snapshot["enabled_platform_count"]),
         readiness_actions=list(readiness_snapshot["recommended_actions"]),
+        munpia_enabled=bool(config.get("platforms", {}).get("munpia", {}).get("enabled", False)),
+        munpia_has_saved_session=bool(munpia_session_snapshot["has_saved_session"]),
     )
 
     return {
         "platform_rows": platform_rows,
+        "munpia_session": munpia_session_snapshot,
         "publishing_ready": readiness_snapshot["publishing_ready"],
         "enabled_platform_count": readiness_snapshot["enabled_platform_count"],
         "ready_platform_count": readiness_snapshot["ready_platform_count"],
@@ -363,11 +369,15 @@ def _build_publishing_operations_actions(
     pending_job_count: int,
     enabled_platform_count: int,
     readiness_actions: list[str],
+    munpia_enabled: bool,
+    munpia_has_saved_session: bool,
 ) -> list[str]:
     actions: list[str] = []
     if not publishing_ready and enabled_platform_count > 0:
         actions.append("플랫폼 계정과 작품 매핑을 먼저 완료하세요.")
     actions.extend(readiness_actions)
+    if munpia_enabled and not munpia_has_saved_session:
+        actions.append("문피아 수동 로그인 세션을 먼저 저장하세요.")
     if publishing_ready and pending_job_count <= 0:
         actions.append("업로드 큐에 발행할 회차를 추가하세요.")
     elif publishing_ready:
@@ -517,6 +527,28 @@ def _render_platform_settings(project_name: str, store: PublishingStore, config:
                     store.save_config(config)
                     st.success(f"{label} 작품 생성 완료: `{created_work_id}`")
                     st.rerun()
+
+        if platform_name == "munpia":
+            session_snapshot = build_munpia_session_snapshot(project_name=project_name)
+            st.caption("문피아는 자동 로그인 대신 수동 로그인 세션 재사용을 권장합니다.")
+            st.markdown(f"- 세션 파일: {'있음' if session_snapshot['has_saved_session'] else '없음'}")
+            st.markdown(f"- 경로: `{session_snapshot['session_state_path']}`")
+            st.code(session_snapshot["command"], language="bash")
+            if st.button("문피아 세션 저장 시작", use_container_width=True, key="publishing_munpia_bootstrap"):
+                ok, message = launch_bootstrap_terminal(project_name=project_name)
+                if ok:
+                    st.success(message)
+                else:
+                    st.warning(message)
+
+
+def build_munpia_session_snapshot(*, project_name: str) -> dict:
+    session_path = PlatformSessionStore(project_name).session_state_path("munpia")
+    return {
+        "session_state_path": str(session_path),
+        "has_saved_session": session_path.exists(),
+        "command": build_bootstrap_command(project_name=project_name),
+    }
 
 
 def _render_schedule_settings(store: PublishingStore, config: dict) -> None:

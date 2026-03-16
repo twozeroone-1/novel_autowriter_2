@@ -1,4 +1,6 @@
 import unittest
+import tempfile
+from pathlib import Path
 
 from core.platform_clients.base import EpisodeUploadRequest, PlatformError, PlatformWorkMetadata
 
@@ -11,12 +13,14 @@ class FakeBrowserSession:
         click_urls: list[str] | None = None,
         fail_on_fill: str = "",
         present_selectors: set[str] | None = None,
+        content_html: str = "",
     ):
         self.actions: list[tuple[str, str, str]] = []
         self.current_url = ""
         self.click_urls = list(click_urls or ([click_url] if click_url else []))
         self.fail_on_fill = fail_on_fill
         self.present_selectors = set(present_selectors or set())
+        self.content_html = content_html
 
     def goto(self, url: str) -> None:
         self.current_url = url
@@ -46,6 +50,9 @@ class FakeBrowserSession:
     def has_selector(self, selector: str, timeout_ms: int = 0) -> bool:
         self.actions.append(("has_selector", selector, str(timeout_ms)))
         return selector in self.present_selectors
+
+    def content(self) -> str:
+        return self.content_html
 
     def close(self) -> None:
         self.actions.append(("close", "", ""))
@@ -83,6 +90,43 @@ class TestMunpiaClient(unittest.TestCase):
                 ("click", "button[type='submit']", ""),
             ],
         )
+
+    def test_login_detects_munpia_security_checkpoint(self):
+        from core.platform_clients.munpia import MunpiaClient
+
+        browser = FakeBrowserSession(
+            content_html="<html><body><h1>문피아 보안 점검 안내</h1></body></html>",
+        )
+        client = MunpiaClient(
+            username="writer-id",
+            password="secret",
+            browser_session=browser,
+        )
+
+        with self.assertRaises(PlatformError) as context:
+            client.login()
+
+        self.assertEqual(context.exception.error_type, "requires_user_action")
+        self.assertIn("보안 점검", str(context.exception))
+
+    def test_login_skips_form_flow_when_saved_session_state_exists(self):
+        from core.platform_clients.munpia import MunpiaClient
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            session_state_path = Path(tmpdir) / "munpia.json"
+            session_state_path.write_text("{}", encoding="utf-8")
+            browser = FakeBrowserSession()
+            client = MunpiaClient(
+                username="writer-id",
+                password="secret",
+                browser_session=browser,
+                platform_config={"session_state_path": str(session_state_path)},
+            )
+
+            result = client.login()
+
+        self.assertTrue(result.success)
+        self.assertEqual(browser.actions, [])
 
     def test_munpia_client_maps_missing_editor_field_to_retryable_error(self):
         from core.platform_clients.munpia import MunpiaClient

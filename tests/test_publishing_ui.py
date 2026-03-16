@@ -360,6 +360,45 @@ class TestPublishingUi(unittest.TestCase):
         self.assertIn("shared blocker", snapshot["blockers"])
         self.assertIn("shared action", snapshot["next_actions"])
 
+    def test_build_munpia_session_snapshot_reports_missing_session_and_command(self):
+        module = self._load_module()
+
+        with patch.object(module, "build_bootstrap_command", return_value="python3 scripts/bootstrap_munpia_session.py 2"), patch.object(
+            module, "PlatformSessionStore"
+        ) as store_cls:
+            store_cls.return_value.session_state_path.return_value.exists.return_value = False
+            store_cls.return_value.session_state_path.return_value = store_cls.return_value.session_state_path.return_value
+
+            snapshot = module.build_munpia_session_snapshot(project_name="2")
+
+        self.assertFalse(snapshot["has_saved_session"])
+        self.assertIn("bootstrap_munpia_session.py 2", snapshot["command"])
+
+    def test_build_publishing_operations_snapshot_adds_munpia_session_action_when_missing(self):
+        module = self._load_module()
+
+        with patch.object(module, "build_munpia_session_snapshot", return_value={"has_saved_session": False}):
+            snapshot = module.build_publishing_operations_snapshot(
+                project_name="sample",
+                config={
+                    "enabled": True,
+                    "schedule": {"type": "daily", "time": "21:00"},
+                    "platforms": {
+                        "munpia": {
+                            "enabled": True,
+                            "work_id": "549287",
+                            "upload_url_template": "https://example.test/{work_id}",
+                        }
+                    },
+                },
+                runtime={"status": "idle", "last_error": ""},
+                queue=[],
+                history=[],
+                credential_loader=lambda _project, _platform: {"username": "writer", "password": "secret"},
+            )
+
+        self.assertIn("문피아 수동 로그인 세션을 먼저 저장하세요.", snapshot["next_actions"])
+
 
 if __name__ == "__main__":
     unittest.main()

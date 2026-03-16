@@ -6,6 +6,7 @@ from core.platform_clients.base import EpisodeUploadRequest, PlatformError, Plat
 from core.platform_clients.munpia import MunpiaClient
 from core.platform_clients.novelpia import NovelpiaClient
 from core.platform_credentials import load_platform_credentials
+from core.platform_session_store import PlatformSessionStore
 
 
 class PublishingExecutor:
@@ -38,6 +39,10 @@ class PublishingExecutor:
 
         for platform_name, package in deepcopy(packager_report.get("packages", {})).items():
             platform_config = deepcopy(config.get("platforms", {}).get(platform_name, {}))
+            platform_config.setdefault(
+                "session_state_path",
+                str(PlatformSessionStore(self.project_name).session_state_path(platform_name)),
+            )
             if not platform_config.get("enabled", False):
                 platform_results[platform_name] = {
                     "status": "failed",
@@ -176,6 +181,10 @@ class PublishingExecutor:
                 continue
 
             platform_config = deepcopy(config.get("platforms", {}).get(platform_name, {}))
+            platform_config.setdefault(
+                "session_state_path",
+                str(PlatformSessionStore(self.project_name).session_state_path(platform_name)),
+            )
             if not platform_config.get("enabled", False):
                 platform_results[platform_name] = {
                     "status": "failed",

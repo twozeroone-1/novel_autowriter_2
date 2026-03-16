@@ -4,6 +4,7 @@ from core.platform_clients.base import PlatformError
 from core.platform_clients.munpia import MunpiaClient
 from core.platform_clients.novelpia import NovelpiaClient
 from core.platform_credentials import load_platform_credentials
+from core.platform_session_store import PlatformSessionStore
 from core.publishing_readiness import build_publishing_readiness_snapshot
 from core.publishing_store import PublishingStore
 
@@ -43,6 +44,10 @@ def run_publishing_smoke(
 
     for platform_name in selected_platforms:
         platform_config = deepcopy(resolved_config.get("platforms", {}).get(platform_name, {}))
+        platform_config.setdefault(
+            "session_state_path",
+            str(PlatformSessionStore(project_name).session_state_path(platform_name)),
+        )
         row = readiness_rows.get(platform_name, {})
         readiness_failure = _build_readiness_failure(platform_name=platform_name, row=row)
         if readiness_failure is not None:

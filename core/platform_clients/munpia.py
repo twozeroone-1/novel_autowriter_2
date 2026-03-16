@@ -1,4 +1,5 @@
 from urllib.parse import urlparse
+from pathlib import Path
 
 from core.platform_clients.base import (
     BasePlatformClient,
@@ -44,14 +45,19 @@ class MunpiaClient(BasePlatformClient):
 
     def login(self) -> PlatformActionResult:
         self._require_credentials()
+        if self._has_saved_session_state():
+            return PlatformActionResult(status="done", success=True)
         browser = self._get_browser()
         selectors = self._selectors()
         try:
             browser.goto(self.LOGIN_URL)
+            self._ensure_not_security_checkpoint(browser)
             browser.fill(selectors["login_username"], self.username)
             browser.fill(selectors["login_password"], self.password)
             browser.click(selectors["login_submit"])
         except Exception as exc:
+            if isinstance(exc, PlatformError):
+                raise
             raise self._classify_browser_error(exc) from exc
         return PlatformActionResult(status="done", success=True)
 
@@ -193,7 +199,10 @@ class MunpiaClient(BasePlatformClient):
 
     def _get_browser(self):
         if self._browser_session is None:
-            self._browser_session = PlaywrightBrowserSession(headless=self.headless)
+            self._browser_session = PlaywrightBrowserSession(
+                headless=self.headless,
+                storage_state_path=self._resolved_session_state_path(),
+            )
         return self._browser_session
 
     def _selectors(self) -> dict:
@@ -207,6 +216,27 @@ class MunpiaClient(BasePlatformClient):
         if "editor" in lowered or "timeout" in lowered or "missing" in lowered:
             return PlatformError(message, error_type="retryable")
         return PlatformError(message, error_type="permanent")
+
+    def _ensure_not_security_checkpoint(self, browser) -> None:
+        content = ""
+        if hasattr(browser, "content"):
+            try:
+                content = str(browser.content() or "")
+            except Exception:
+                content = ""
+        if "문피아 보안 점검 안내" in content:
+            raise PlatformError(
+                "문피아 보안 점검이 자동 로그인을 차단했습니다. scripts/bootstrap_munpia_session.py로 수동 세션을 저장한 뒤 다시 시도하세요.",
+                error_type="requires_user_action",
+            )
+
+    def _resolved_session_state_path(self) -> str:
+        value = str(self.platform_config.get("session_state_path", "")).strip()
+        return value
+
+    def _has_saved_session_state(self) -> bool:
+        path = self._resolved_session_state_path()
+        return bool(path and Path(path).exists())
 
 
 def _extract_last_url_segment(url: str) -> str:

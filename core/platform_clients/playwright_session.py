@@ -1,4 +1,5 @@
 import time
+from pathlib import Path
 
 try:
     from playwright.sync_api import sync_playwright
@@ -6,7 +7,7 @@ except ModuleNotFoundError:
     sync_playwright = None
 
 class PlaywrightBrowserSession:
-    def __init__(self, *, headless: bool = True):
+    def __init__(self, *, headless: bool = True, storage_state_path: str | Path | None = None):
         if sync_playwright is None:
             raise RuntimeError(
                 "Playwright is not installed. Run `python -m pip install playwright` "
@@ -14,7 +15,13 @@ class PlaywrightBrowserSession:
             )
         self._playwright = sync_playwright().start()
         self._browser = self._playwright.chromium.launch(headless=headless)
-        self._page = self._browser.new_page()
+        context_kwargs = {}
+        if storage_state_path:
+            state_path = Path(storage_state_path)
+            if state_path.exists():
+                context_kwargs["storage_state"] = str(state_path)
+        self._context = self._browser.new_context(**context_kwargs)
+        self._page = self._context.new_page()
 
     @property
     def current_url(self) -> str:
@@ -84,6 +91,12 @@ class PlaywrightBrowserSession:
             return False
         return True
 
+    def save_storage_state(self, path: str | Path) -> None:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        self._context.storage_state(path=str(target))
+
     def close(self) -> None:
+        self._context.close()
         self._browser.close()
         self._playwright.stop()
