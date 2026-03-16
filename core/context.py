@@ -11,11 +11,13 @@ from core.story_bible_store import DEFAULT_STORY_BIBLE, StoryBibleStore
 
 
 BASE_DATA_DIR = DATA_PROJECTS_DIR
-DEFAULT_CONFIG = {
+DEFAULT_STORY_BIBLE_SHADOW = {
     "worldview": "여기에 세계관(STORY_BIBLE)을 작성해 주세요.",
     "tone_and_manner": "여기에 문체(STYLE_GUIDE) 지침을 작성해 주세요.",
     "continuity": "여기에 절대 변경 불가 룰, 연표, 관계도(CONTINUITY)를 작성하세요.",
 }
+# Backward-compatible alias for existing tests and callers.
+DEFAULT_CONFIG = DEFAULT_STORY_BIBLE_SHADOW
 
 
 class ContextManager:
@@ -36,13 +38,13 @@ class ContextManager:
 
     def _ensure_default_files(self) -> None:
         if not self.config_path.exists():
-            atomic_write_json(self.config_path, DEFAULT_CONFIG.copy())
+            atomic_write_json(self.config_path, DEFAULT_STORY_BIBLE_SHADOW.copy())
         if not self.chars_path.exists():
             self.save_characters([])
 
     def _default_value_for(self, path: Path) -> dict | list:
         if path.name == "config.json":
-            return DEFAULT_CONFIG.copy()
+            return DEFAULT_STORY_BIBLE_SHADOW.copy()
         return []
 
     def _load_json(self, path: Path) -> dict | list:
@@ -57,7 +59,7 @@ class ContextManager:
 
         if path.name == "config.json" and not isinstance(data, dict):
             print(f"[ContextManager] Invalid config shape at {path}: expected object")
-            return DEFAULT_CONFIG.copy()
+            return DEFAULT_STORY_BIBLE_SHADOW.copy()
 
         if path.name != "config.json" and not isinstance(data, list):
             print(f"[ContextManager] Invalid characters shape at {path}: expected array")
@@ -65,21 +67,21 @@ class ContextManager:
 
         return data
 
-    def _normalize_config(self, config: dict | list) -> dict:
-        merged = DEFAULT_CONFIG.copy()
-        if not isinstance(config, dict):
+    def _normalize_story_bible_shadow_payload(self, payload: dict | list) -> dict:
+        merged = DEFAULT_STORY_BIBLE_SHADOW.copy()
+        if not isinstance(payload, dict):
             return merged
 
-        for key, default_value in DEFAULT_CONFIG.items():
-            value = config.get(key, default_value)
+        for key, default_value in DEFAULT_STORY_BIBLE_SHADOW.items():
+            value = payload.get(key, default_value)
             if value is None:
                 merged[key] = default_value
             else:
                 merged[key] = value if isinstance(value, str) else str(value)
         return merged
 
-    def _load_normalized_config(self) -> dict:
-        return self._normalize_config(self._load_json(self.config_path))
+    def _load_story_bible_shadow_payload(self) -> dict:
+        return self._normalize_story_bible_shadow_payload(self._load_json(self.config_path))
 
     def _load_raw_config_payload(self) -> dict:
         payload = self._load_json(self.config_path)
@@ -87,27 +89,49 @@ class ContextManager:
             return payload.copy()
         return {}
 
-    def _merge_story_bible_into_config(self, config: dict) -> dict:
-        merged = DEFAULT_CONFIG.copy()
-        merged.update(config)
+    def _build_story_bible_compatibility_view(self, shadow_payload: dict) -> dict:
+        merged = DEFAULT_STORY_BIBLE_SHADOW.copy()
+        merged.update(shadow_payload)
         if not self.story_bible_store.story_bible_path.exists():
             return merged
 
         story_bible = self.story_bible_store.load()
 
-        if story_bible.get("worldview") != DEFAULT_STORY_BIBLE["worldview"] or merged["worldview"] == DEFAULT_CONFIG["worldview"]:
+        if (
+            story_bible.get("worldview") != DEFAULT_STORY_BIBLE["worldview"]
+            or merged["worldview"] == DEFAULT_STORY_BIBLE_SHADOW["worldview"]
+        ):
             merged["worldview"] = story_bible.get("worldview", merged["worldview"])
-        if story_bible.get("style_guide") != DEFAULT_STORY_BIBLE["style_guide"] or merged["tone_and_manner"] == DEFAULT_CONFIG["tone_and_manner"]:
+        if (
+            story_bible.get("style_guide") != DEFAULT_STORY_BIBLE["style_guide"]
+            or merged["tone_and_manner"] == DEFAULT_STORY_BIBLE_SHADOW["tone_and_manner"]
+        ):
             merged["tone_and_manner"] = story_bible.get("style_guide", merged["tone_and_manner"])
-        if story_bible.get("fixed_rules") != DEFAULT_STORY_BIBLE["fixed_rules"] or merged["continuity"] == DEFAULT_CONFIG["continuity"]:
+        if (
+            story_bible.get("fixed_rules") != DEFAULT_STORY_BIBLE["fixed_rules"]
+            or merged["continuity"] == DEFAULT_STORY_BIBLE_SHADOW["continuity"]
+        ):
             merged["continuity"] = story_bible.get("fixed_rules", merged["continuity"])
 
         return merged
 
-    def _write_legacy_config(self, config: dict) -> None:
+    def _write_story_bible_shadow_payload(self, payload: dict) -> None:
         merged = self._load_raw_config_payload()
-        merged.update(self._normalize_config(config))
+        merged.update(self._normalize_story_bible_shadow_payload(payload))
         atomic_write_json(self.config_path, merged)
+
+    def _write_story_bible_shadow(
+        self,
+        *,
+        worldview: str,
+        tone_and_manner: str,
+        continuity: str,
+    ) -> None:
+        shadow_payload = self._load_story_bible_shadow_payload()
+        shadow_payload["worldview"] = str(worldview)
+        shadow_payload["tone_and_manner"] = str(tone_and_manner)
+        shadow_payload["continuity"] = str(continuity)
+        self._write_story_bible_shadow_payload(shadow_payload)
 
     def _load_plot_payload(self) -> dict:
         if self.plot_store.plot_path.exists():
@@ -122,7 +146,7 @@ class ContextManager:
     def _write_legacy_plot_shadow(self, payload: dict) -> None:
         config = self._load_raw_config_payload()
         if not config:
-            config = DEFAULT_CONFIG.copy()
+            config = DEFAULT_STORY_BIBLE_SHADOW.copy()
         config["plot_outline"] = str(payload.get("plot_outline", ""))
         config["plot_version"] = str(payload.get("plot_version", "0"))
         atomic_write_json(self.config_path, config)
@@ -135,7 +159,7 @@ class ContextManager:
     ) -> None:
         config = self._load_raw_config_payload()
         if not config:
-            config = DEFAULT_CONFIG.copy()
+            config = DEFAULT_STORY_BIBLE_SHADOW.copy()
         if state is not None:
             config["state"] = str(state)
         if summary_of_previous is not None:
@@ -254,7 +278,7 @@ class ContextManager:
         return "\n".join(lines)
 
     def get_config(self) -> dict:
-        return self._merge_story_bible_into_config(self._load_normalized_config())
+        return self._build_story_bible_compatibility_view(self._load_story_bible_shadow_payload())
 
     def get_workspace_settings(self) -> dict:
         story_bible_fields = self._get_story_bible_prompt_fields()
@@ -274,12 +298,12 @@ class ContextManager:
         return self._normalize_characters(self._load_json(self.chars_path))
 
     def save_config(self, config_data: dict) -> None:
-        normalized = self._normalize_config(config_data)
-        legacy_config = self._load_normalized_config()
-        legacy_config["worldview"] = normalized.get("worldview", DEFAULT_CONFIG["worldview"])
-        legacy_config["tone_and_manner"] = normalized.get("tone_and_manner", DEFAULT_CONFIG["tone_and_manner"])
-        legacy_config["continuity"] = normalized.get("continuity", DEFAULT_CONFIG["continuity"])
-        self._write_legacy_config(legacy_config)
+        normalized = self._normalize_story_bible_shadow_payload(config_data)
+        self._write_story_bible_shadow(
+            worldview=normalized.get("worldview", DEFAULT_CONFIG["worldview"]),
+            tone_and_manner=normalized.get("tone_and_manner", DEFAULT_CONFIG["tone_and_manner"]),
+            continuity=normalized.get("continuity", DEFAULT_CONFIG["continuity"]),
+        )
         self.story_bible_store.save(
             {
                 "worldview": normalized.get("worldview", DEFAULT_CONFIG["worldview"]),
@@ -300,12 +324,11 @@ class ContextManager:
         story_bible["style_guide"] = str(tone_and_manner)
         story_bible["fixed_rules"] = str(continuity)
         self.story_bible_store.save(story_bible)
-
-        config = self._load_normalized_config()
-        config["worldview"] = str(worldview)
-        config["tone_and_manner"] = str(tone_and_manner)
-        config["continuity"] = str(continuity)
-        self._write_legacy_config(config)
+        self._write_story_bible_shadow(
+            worldview=str(worldview),
+            tone_and_manner=str(tone_and_manner),
+            continuity=str(continuity),
+        )
 
     def save_state(self, state: str) -> None:
         snapshot = self._get_state_snapshot()

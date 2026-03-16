@@ -473,6 +473,82 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(config["tone_and_manner"], "new style")
                 self.assertEqual(config["continuity"], "new rules")
 
+    def test_new_project_config_initializes_story_bible_shadow_only(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)):
+                manager = ContextManager(project_name="sample")
+
+                config_payload = json.loads(manager.config_path.read_text(encoding="utf-8"))
+
+                self.assertEqual(config_payload, context_module.DEFAULT_CONFIG)
+                self.assertNotIn("state", config_payload)
+                self.assertNotIn("summary_of_previous", config_payload)
+                self.assertNotIn("plot_outline", config_payload)
+                self.assertNotIn("plot_version", config_payload)
+
+    def test_save_story_bible_sections_routes_story_bible_shadow_write_through_shared_helper(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ):
+                manager = ContextManager(project_name="sample")
+
+                with patch.object(
+                    manager,
+                    "_write_story_bible_shadow",
+                    wraps=manager._write_story_bible_shadow,
+                ) as write_story_bible_shadow:
+                    manager.save_story_bible_sections(
+                        worldview="new world",
+                        tone_and_manner="new style",
+                        continuity="new rules",
+                    )
+
+                write_story_bible_shadow.assert_called_once_with(
+                    worldview="new world",
+                    tone_and_manner="new style",
+                    continuity="new rules",
+                )
+                story_bible = StoryBibleStore(project_name="sample").load()
+                self.assertEqual(story_bible["worldview"], "new world")
+                self.assertEqual(story_bible["style_guide"], "new style")
+                self.assertEqual(story_bible["fixed_rules"], "new rules")
+
+    def test_save_story_bible_sections_preserves_existing_state_and_plot_shadow_fields(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ):
+                manager = ContextManager(project_name="sample")
+                manager.config_path.write_text(
+                    json.dumps(
+                        {
+                            **context_module.DEFAULT_CONFIG,
+                            "state": "legacy state",
+                            "summary_of_previous": "legacy summary",
+                            "plot_outline": "legacy plot",
+                            "plot_version": "4",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+
+                manager.save_story_bible_sections(
+                    worldview="new world",
+                    tone_and_manner="new style",
+                    continuity="new rules",
+                )
+
+                config_payload = json.loads(manager.config_path.read_text(encoding="utf-8"))
+                self.assertEqual(config_payload["worldview"], "new world")
+                self.assertEqual(config_payload["tone_and_manner"], "new style")
+                self.assertEqual(config_payload["continuity"], "new rules")
+                self.assertEqual(config_payload["state"], "legacy state")
+                self.assertEqual(config_payload["summary_of_previous"], "legacy summary")
+                self.assertEqual(config_payload["plot_outline"], "legacy plot")
+                self.assertEqual(config_payload["plot_version"], "4")
+
     def test_update_worldview_uses_story_bible_save_path_and_preserves_other_sections(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
@@ -587,6 +663,37 @@ class TestContextManager(unittest.TestCase):
                 self.assertNotIn("plot_version", config)
                 self.assertEqual(plot_payload["plot_outline"], "stored plot")
                 self.assertEqual(plot_payload["plot_version"], "1")
+
+    def test_save_config_routes_story_bible_shadow_write_through_shared_helper(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ):
+                manager = ContextManager(project_name="sample")
+
+                with patch.object(
+                    manager,
+                    "_write_story_bible_shadow",
+                    wraps=manager._write_story_bible_shadow,
+                ) as write_story_bible_shadow:
+                    manager.save_config(
+                        {
+                            **context_module.DEFAULT_CONFIG,
+                            "worldview": "new world",
+                            "tone_and_manner": "new style",
+                            "continuity": "new rules",
+                        }
+                    )
+
+                write_story_bible_shadow.assert_called_once_with(
+                    worldview="new world",
+                    tone_and_manner="new style",
+                    continuity="new rules",
+                )
+                story_bible = StoryBibleStore(project_name="sample").load()
+                self.assertEqual(story_bible["worldview"], "new world")
+                self.assertEqual(story_bible["style_guide"], "new style")
+                self.assertEqual(story_bible["fixed_rules"], "new rules")
 
     def test_save_config_ignores_state_fields_and_preserves_existing_context_state_store_value(self):
         with tempfile.TemporaryDirectory() as tmpdir:
