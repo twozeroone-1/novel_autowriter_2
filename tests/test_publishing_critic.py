@@ -43,7 +43,10 @@ class TestPublishingCritic(unittest.TestCase):
             "generate_text",
             return_value='{"status":"blocked","summary":"objective drift","issues":["episode objective missing"]}',
         ):
-            result = module.evaluate_publish_critic(_valid_source())
+            result = module.evaluate_publish_critic(
+                _valid_source(),
+                episode_plan={"episode_objective": "계약 대가를 수습한다"},
+            )
 
         self.assertEqual(result["status"], "blocked")
         self.assertIn("episode objective missing", result["issues"])
@@ -51,7 +54,10 @@ class TestPublishingCritic(unittest.TestCase):
     def test_evaluate_publish_critic_returns_unavailable_on_llm_error(self):
         module = self._load_module()
         with patch.object(module, "generate_text", side_effect=LLMError("backend unavailable")):
-            result = module.evaluate_publish_critic(_valid_source())
+            result = module.evaluate_publish_critic(
+                _valid_source(),
+                episode_plan={"episode_objective": "계약 대가를 수습한다"},
+            )
 
         self.assertEqual(result["status"], "critic_unavailable")
         self.assertIn("backend unavailable", result["summary"])
@@ -59,7 +65,10 @@ class TestPublishingCritic(unittest.TestCase):
     def test_evaluate_publish_critic_returns_unavailable_on_bad_json(self):
         module = self._load_module()
         with patch.object(module, "generate_text", return_value="json 없음"):
-            result = module.evaluate_publish_critic(_valid_source())
+            result = module.evaluate_publish_critic(
+                _valid_source(),
+                episode_plan={"episode_objective": "계약 대가를 수습한다"},
+            )
 
         self.assertEqual(result["status"], "critic_unavailable")
         self.assertTrue(result["raw_excerpt"])

@@ -670,6 +670,70 @@ class TestPublishingRuntime(unittest.TestCase):
         self.assertEqual(state["status"], "blocked")
         self.assertEqual(history[0]["publish_quality"]["status"], "hard_fail")
 
+    def test_tick_passes_episode_plan_into_quality_gate_when_source_provides_it(self):
+        module = importlib.import_module("core.publishing_runtime")
+        runtime_cls = getattr(module, "PublishingRuntime")
+        now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            self._write_chapter(projects_dir)
+            with patch("core.publishing_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir
+            ), patch("core.canon_store.DATA_PROJECTS_DIR", projects_dir), patch.object(
+                module,
+                "load_chapter_source",
+                return_value={
+                    "path": str(projects_dir / "sample" / "chapters" / "12화.md"),
+                    "title": "12화. 계약의 대가",
+                    "content": "# 12화. 계약의 대가\n\n" + ("정상 본문입니다.\n" * 60),
+                    "episode_id": "ep_012",
+                    "episode_plan": {"episode_objective": "계약의 대가를 수습한다"},
+                },
+            ), patch.object(
+                module,
+                "evaluate_quality_gate",
+                return_value={
+                    "status": "hard_fail",
+                    "attempted_repair": False,
+                    "final_source": {
+                        "title": "12화. 계약의 대가",
+                        "content": "# 12화. 계약의 대가\n\n문제가 있는 본문",
+                    },
+                    "gate_reports": {
+                        "final": {
+                            "critic": {
+                                "status": "blocked",
+                                "summary": "objective drift",
+                                "issues": ["episode objective missing"],
+                            }
+                        }
+                    },
+                    "errors": ["episode objective missing"],
+                    "repair_summary": {"status": "skipped", "reason": "objective drift"},
+                },
+            ) as evaluate_quality_gate:
+                store = PublishingStore(project_name="sample")
+                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                store.save_queue(
+                    [
+                        {
+                            "id": "pub1",
+                            "source_path": "chapters/12화.md",
+                            "chapter_title": "Episode 12",
+                            "status": "pending",
+                            "attempt_count": 0,
+                            "targets": {"munpia": {"selected": True, "status": "pending"}},
+                        }
+                    ]
+                )
+                executor = FakePublishingExecutor()
+                runtime = runtime_cls(store=store, executor=executor)
+
+                runtime.tick(now=now)
+
+        self.assertEqual(evaluate_quality_gate.call_args.kwargs["episode_plan"]["episode_objective"], "계약의 대가를 수습한다")
+
     def test_tick_uses_orchestrator_final_source_for_executor_payload(self):
         module = importlib.import_module("core.publishing_runtime")
         runtime_cls = getattr(module, "PublishingRuntime")
@@ -1155,6 +1219,73 @@ class TestPublishingRuntime(unittest.TestCase):
         self.assertFalse(history[0]["success"])
         self.assertTrue(run_dirs)
         self.assertEqual(quality_report["status"], "hard_fail")
+
+    def test_tick_preserves_critic_report_in_quality_snapshot(self):
+        module = importlib.import_module("core.publishing_runtime")
+        runtime_cls = getattr(module, "PublishingRuntime")
+        now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
+        quality_result = {
+            "status": "hard_fail",
+            "attempted_repair": False,
+            "final_source": {
+                "title": "12화. 계약의 대가",
+                "content": "# 12화. 계약의 대가\n\n문제가 있는 본문",
+            },
+            "gate_reports": {
+                "initial": {
+                    "rules": {"status": "publishable", "errors": []},
+                    "structure": {"status": "passed", "errors": []},
+                },
+                "final": {
+                    "rules": {"status": "publishable", "errors": []},
+                    "structure": {"status": "passed", "errors": []},
+                    "critic": {
+                        "status": "blocked",
+                        "summary": "objective drift",
+                        "issues": ["episode objective missing"],
+                    },
+                },
+            },
+            "errors": ["episode objective missing", "objective drift"],
+            "repair_summary": {"status": "skipped", "reason": "objective drift"},
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            self._write_chapter(projects_dir)
+            with patch("core.publishing_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.chapter_source.DATA_PROJECTS_DIR", projects_dir
+            ), patch("core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.canon_store.DATA_PROJECTS_DIR", projects_dir
+            ), patch.object(
+                module,
+                "evaluate_quality_gate",
+                return_value=quality_result,
+            ):
+                store = PublishingStore(project_name="sample")
+                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                store.save_queue(
+                    [
+                        {
+                            "id": "pub1",
+                            "source_path": "chapters/12화.md",
+                            "chapter_title": "Episode 12",
+                            "status": "pending",
+                            "attempt_count": 0,
+                            "targets": {"munpia": {"selected": True, "status": "pending"}},
+                        }
+                    ]
+                )
+                executor = FakePublishingExecutor()
+                runtime = runtime_cls(store=store, executor=executor)
+
+                runtime.tick(now=now)
+                run_dirs = list((projects_dir / "sample" / "runs").glob("*"))
+                quality_report = json.loads((run_dirs[0] / "quality_report.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(executor.call_count, 0)
+        self.assertEqual(quality_report["gate_reports"]["final"]["critic"]["status"], "blocked")
+        self.assertIn("episode objective missing", quality_report["errors"])
 
     def test_tick_writes_run_snapshots_and_updates_canon_only_on_success(self):
         runtime_cls = self._load_runtime_cls()

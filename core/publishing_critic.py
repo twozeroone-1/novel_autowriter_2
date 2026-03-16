@@ -13,6 +13,30 @@ DEFAULT_CRITIC_REPORT = {
 }
 
 
+def _has_meaningful_episode_plan(episode_plan: dict | None) -> bool:
+    if not isinstance(episode_plan, dict):
+        return False
+
+    scalar_fields = (
+        "episode_objective",
+        "tone_notes",
+    )
+    list_fields = (
+        "must_include_characters",
+        "hooks_to_payoff",
+        "hooks_to_advance",
+        "forbidden_moves",
+        "continuity_focus",
+    )
+    if any(str(episode_plan.get(field, "") or "").strip() for field in scalar_fields):
+        return True
+    for field in list_fields:
+        value = episode_plan.get(field, [])
+        if isinstance(value, list) and any(str(item or "").strip() for item in value):
+            return True
+    return False
+
+
 def _build_critic_prompt(final_source: dict, episode_plan: dict | None) -> str:
     title = str(final_source.get("title", "")).strip()
     content = str(final_source.get("content", "")).strip()
@@ -68,6 +92,13 @@ def _normalize_critic_payload(payload: dict | None, *, raw_text: str) -> dict:
 
 
 def evaluate_publish_critic(final_source: dict, *, episode_plan: dict | None = None) -> dict:
+    if not _has_meaningful_episode_plan(episode_plan):
+        report = dict(DEFAULT_CRITIC_REPORT)
+        report["status"] = "passed"
+        report["summary"] = "critic skipped: no episode plan"
+        report["model"] = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        return report
+
     prompt = _build_critic_prompt(final_source, episode_plan)
     try:
         raw_text = generate_text(

@@ -77,7 +77,10 @@ class PublishingRuntime:
                 },
             },
         )
-        publish_quality = evaluate_quality_gate(source_payload)
+        publish_quality = evaluate_quality_gate(
+            source_payload,
+            episode_plan=source_payload.get("episode_plan"),
+        )
         quality_report = deepcopy(publish_quality)
         self.snapshot_store.write_json_snapshot(run_id, "quality_report.json", quality_report)
         if publish_quality.get("status") != "publishable":
