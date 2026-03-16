@@ -65,6 +65,52 @@ class TestPlatformCredentials(unittest.TestCase):
 
             self.assertFalse(has_secure_storage())
 
+    def test_load_platform_credentials_falls_back_to_env_when_secure_storage_unavailable(self):
+        with patch("core.platform_credentials.keyring", None), patch.dict(
+            "os.environ",
+            {
+                "NOVEL_AUTOWRITER_1_MUNPIA_USERNAME": "env-user",
+                "NOVEL_AUTOWRITER_1_MUNPIA_PASSWORD": "env-pass",
+            },
+            clear=True,
+        ):
+            from core.platform_credentials import load_platform_credentials
+
+            payload = load_platform_credentials("1", "munpia")
+
+        self.assertEqual(payload, {"username": "env-user", "password": "env-pass"})
+
+    def test_load_platform_credentials_prefers_project_scoped_env_over_platform_global_env(self):
+        with patch("core.platform_credentials.keyring", None), patch.dict(
+            "os.environ",
+            {
+                "NOVEL_AUTOWRITER_MUNPIA_USERNAME": "global-user",
+                "NOVEL_AUTOWRITER_MUNPIA_PASSWORD": "global-pass",
+                "NOVEL_AUTOWRITER_SAMPLE_MUNPIA_USERNAME": "project-user",
+                "NOVEL_AUTOWRITER_SAMPLE_MUNPIA_PASSWORD": "project-pass",
+            },
+            clear=True,
+        ):
+            from core.platform_credentials import load_platform_credentials
+
+            payload = load_platform_credentials("sample", "munpia")
+
+        self.assertEqual(payload, {"username": "project-user", "password": "project-pass"})
+
+    def test_load_platform_credentials_ignores_partial_env_credentials(self):
+        with patch("core.platform_credentials.keyring", None), patch.dict(
+            "os.environ",
+            {
+                "NOVEL_AUTOWRITER_NOVELPIA_USERNAME": "only-user",
+            },
+            clear=True,
+        ):
+            from core.platform_credentials import load_platform_credentials
+
+            payload = load_platform_credentials("sample", "novelpia")
+
+        self.assertEqual(payload, {"username": "", "password": ""})
+
 
 if __name__ == "__main__":
     unittest.main()

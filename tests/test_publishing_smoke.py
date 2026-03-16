@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from core.platform_clients.base import PlatformActionResult, PlatformError
 
@@ -169,6 +170,37 @@ class TestPublishingSmoke(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["checked_platforms"], ["novelpia"])
         self.assertEqual(seen_platforms, ["novelpia"])
+
+    def test_run_publishing_smoke_uses_shared_env_fallback_credentials(self):
+        from core.platform_credentials import load_platform_credentials
+        from core.publishing_smoke import run_publishing_smoke
+
+        with patch("core.platform_credentials.keyring", None), patch.dict(
+            "os.environ",
+            {
+                "NOVEL_AUTOWRITER_SAMPLE_MUNPIA_USERNAME": "env-user",
+                "NOVEL_AUTOWRITER_SAMPLE_MUNPIA_PASSWORD": "env-pass",
+            },
+            clear=True,
+        ):
+            result = run_publishing_smoke(
+                project_name="sample",
+                config={
+                    "browser": {"headless": True},
+                    "platforms": {
+                        "munpia": {
+                            "name": "munpia",
+                            "enabled": True,
+                            "work_id": "work-1",
+                        }
+                    },
+                },
+                credential_loader=load_platform_credentials,
+                client_factory=lambda **kwargs: FakeSmokeClient(**kwargs),
+            )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["platform_results"]["munpia"]["status"], "done")
 
 
 if __name__ == "__main__":
