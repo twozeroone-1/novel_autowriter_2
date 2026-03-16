@@ -5,6 +5,7 @@ from pathlib import Path
 
 import streamlit as st
 
+from core.app_paths import DATA_PROJECTS_DIR
 from core.episode_artifact_store import EpisodeArtifactStore
 from core.publishing_store import PublishingStore
 from core.run_snapshot_store import RunSnapshotStore
@@ -17,6 +18,7 @@ WORKFLOW_STAGE_LABELS = ("계획", "초안", "품질 게이트", "발행 패키�
 def build_episode_workflow_snapshot(
     *,
     manifest: dict,
+    latest_episode_content: str,
     latest_episode_plan: dict,
     latest_quality_report: dict,
     latest_packager_report: dict,
@@ -27,6 +29,8 @@ def build_episode_workflow_snapshot(
     plan_ready = _has_meaningful_plan(latest_episode_plan)
     quality_status = str(latest_quality_report.get("status", "")).strip().lower()
     package_count = len((latest_packager_report.get("packages") or {})) if isinstance(latest_packager_report, dict) else 0
+    queue_link = _build_queue_link_snapshot(latest_episode, publishing_queue)
+    quality_flags = _extract_quality_flags(latest_quality_report)
 
     steps = (
         {
@@ -47,7 +51,7 @@ def build_episode_workflow_snapshot(
         {
             "label": WORKFLOW_STAGE_LABELS[3],
             "state": _build_packager_state(package_count=package_count, quality_status=quality_status),
-            "summary": _build_packager_summary(latest_packager_report),
+            "summary": _build_packager_summary(latest_packager_report, queue_link_summary=queue_link["summary"]),
         },
     )
 
@@ -64,7 +68,7 @@ def build_episode_workflow_snapshot(
             _build_episode_headline(latest_episode),
             _build_plan_summary(latest_episode_plan),
             _build_quality_summary(latest_quality_report),
-            _build_packager_summary(latest_packager_report),
+            _build_packager_summary(latest_packager_report, queue_link_summary=queue_link["summary"]),
             f"대기 중인 업로드 작업 {count_pending_publishing_jobs(publishing_queue)}건",
             f"최근 발행 이력 {len(publishing_history)}건",
         ]
@@ -78,8 +82,15 @@ def build_episode_workflow_snapshot(
         "episode_plan_preview": latest_episode_plan if isinstance(latest_episode_plan, dict) else {},
         "quality_report_preview": latest_quality_report if isinstance(latest_quality_report, dict) else {},
         "packager_report_preview": latest_packager_report if isinstance(latest_packager_report, dict) else {},
+        "draft_path": _resolve_episode_display_path(latest_episode),
+        "draft_preview": _build_content_preview(latest_episode_content),
         "quality_summary": _build_quality_summary(latest_quality_report),
-        "packager_summary": _build_packager_summary(latest_packager_report),
+        "critic_status": quality_flags["critic_status"],
+        "repair_applied": quality_flags["repair_applied"],
+        "regenerate_applied": quality_flags["regenerate_applied"],
+        "queue_linked": queue_link["linked"],
+        "queue_link_summary": queue_link["summary"],
+        "packager_summary": _build_packager_summary(latest_packager_report, queue_link_summary=queue_link["summary"]),
     }
 
 
@@ -111,6 +122,29 @@ def render_episode_workflow(app) -> None:
 
     with right_col:
         st.subheader("단계 상세")
+        _render_detail_list(
+            "최근 초안",
+            [
+                f"경로: {snapshot['draft_path'] or '-'}",
+                f"요약: {snapshot['draft_preview']}",
+            ],
+        )
+        _render_detail_list(
+            "품질 게이트",
+            [
+                f"상태: {snapshot['quality_summary']}",
+                f"critic: {snapshot['critic_status'] or '-'}",
+                f"repair: {'적용' if snapshot['repair_applied'] else '없음'}",
+                f"regenerate: {'적용' if snapshot['regenerate_applied'] else '없음'}",
+            ],
+        )
+        _render_detail_list(
+            "발행 패키지",
+            [
+                f"패키지: {snapshot['packager_summary']}",
+                f"큐 연결: {snapshot['queue_link_summary']}",
+            ],
+        )
         _render_json_preview("episode_plan.json", snapshot["episode_plan_preview"])
         _render_json_preview("quality_report.json", snapshot["quality_report_preview"])
         _render_json_preview("packager_report.json", snapshot["packager_report_preview"])
@@ -120,9 +154,11 @@ def load_episode_workflow_context(project_name: str) -> dict:
     artifact_store = EpisodeArtifactStore(project_name=project_name)
     publishing_store = PublishingStore(project_name=project_name)
     snapshot_store = RunSnapshotStore(project_name=project_name)
+    manifest = artifact_store.load_manifest()
 
     return {
-        "manifest": artifact_store.load_manifest(),
+        "manifest": manifest,
+        "latest_episode_content": _load_latest_episode_content(project_name, manifest),
         "latest_episode_plan": _load_latest_run_json(snapshot_store.runs_dir, "chapter_", "episode_plan.json"),
         "latest_quality_report": _load_latest_run_json(snapshot_store.runs_dir, "origin_", "quality_report.json"),
         "latest_packager_report": _load_latest_run_json(snapshot_store.runs_dir, "origin_", "packager_report.json"),
@@ -137,6 +173,12 @@ def _render_json_preview(label: str, payload: dict) -> None:
             st.code(json.dumps(payload, ensure_ascii=False, indent=2), language="json")
         else:
             st.info("아직 저장된 스냅샷이 없습니다.")
+
+
+def _render_detail_list(title: str, lines: list[str]) -> None:
+    st.caption(title)
+    for line in lines:
+        st.markdown(f"- {line}")
 
 
 def _load_latest_run_json(runs_dir: Path, prefix: str, filename: str) -> dict:
@@ -175,6 +217,28 @@ def _select_latest_episode(manifest: dict) -> dict:
             str(payload.get("episode_id", "")),
         ),
     )
+
+
+def _load_latest_episode_content(project_name: str, manifest: dict) -> str:
+    latest_episode = _select_latest_episode(manifest)
+    relative_path = _resolve_episode_display_path(latest_episode)
+    if not relative_path:
+        return ""
+    target = DATA_PROJECTS_DIR / project_name / relative_path
+    try:
+        return target.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def _resolve_episode_display_path(latest_episode: dict) -> str:
+    if not latest_episode:
+        return ""
+    for field in ("draft_path", "publishable_path", "published_path"):
+        value = str(latest_episode.get(field, "")).strip()
+        if value:
+            return value
+    return ""
 
 
 def _has_meaningful_plan(payload: dict) -> bool:
@@ -226,6 +290,23 @@ def _build_draft_summary(latest_episode: dict) -> str:
     return f"{latest_episode.get('title', '')} / {latest_episode.get('status', '')}"
 
 
+def _build_content_preview(content: str, *, limit: int = 180) -> str:
+    normalized_lines: list[str] = []
+    for raw_line in str(content or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            continue
+        normalized_lines.append(line)
+    if not normalized_lines:
+        return "아직 저장된 초안 본문이 없습니다."
+    preview = " ".join(normalized_lines)
+    if len(preview) <= limit:
+        return preview
+    return f"{preview[:limit - 3].rstrip()}..."
+
+
 def _build_quality_state(quality_status: str) -> str:
     if quality_status == "publishable":
         return "완료"
@@ -262,6 +343,23 @@ def _build_quality_summary(payload: dict) -> str:
     return f"최근 품질 상태: {status or '없음'}"
 
 
+def _extract_quality_flags(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        return {
+            "critic_status": "",
+            "repair_applied": False,
+            "regenerate_applied": False,
+        }
+    critic_status = str(
+        (((payload.get("gate_reports") or {}).get("final") or {}).get("critic") or {}).get("status", "")
+    ).strip()
+    return {
+        "critic_status": critic_status,
+        "repair_applied": bool(payload.get("attempted_repair")),
+        "regenerate_applied": bool(payload.get("attempted_regenerate")),
+    }
+
+
 def _build_packager_state(*, package_count: int, quality_status: str) -> str:
     if package_count > 0:
         return "완료"
@@ -272,11 +370,13 @@ def _build_packager_state(*, package_count: int, quality_status: str) -> str:
     return "대기"
 
 
-def _build_packager_summary(payload: dict) -> str:
+def _build_packager_summary(payload: dict, *, queue_link_summary: str = "") -> str:
     packages = (payload.get("packages") or {}) if isinstance(payload, dict) else {}
     if not isinstance(packages, dict) or not packages:
         return "최근 발행 패키지 스냅샷이 없습니다."
     labels = ", ".join(_platform_label(name) for name in packages.keys())
+    if queue_link_summary:
+        return f"{labels} 패키지 준비 완료 / {queue_link_summary}"
     return f"{labels} 패키지 준비 완료"
 
 
@@ -285,6 +385,45 @@ def _platform_label(platform_name: str) -> str:
         "munpia": "문피아",
         "novelpia": "노벨피아",
     }.get(str(platform_name), str(platform_name))
+
+
+def _build_queue_link_snapshot(latest_episode: dict, publishing_queue: list[dict]) -> dict:
+    if not latest_episode:
+        return {"linked": False, "summary": "연결된 업로드 작업이 없습니다."}
+
+    episode_id = str(latest_episode.get("episode_id", "")).strip()
+    title = str(latest_episode.get("title", "")).strip()
+    matched_jobs = []
+    for job in publishing_queue:
+        if not isinstance(job, dict):
+            continue
+        job_status = str(job.get("status", "")).strip()
+        if job_status not in {"pending", "partial_failed", "scheduled"}:
+            continue
+        if episode_id and str(job.get("episode_id", "")).strip() == episode_id:
+            matched_jobs.append(job)
+            continue
+        if title and str(job.get("title", "")).strip() == title:
+            matched_jobs.append(job)
+
+    if not matched_jobs:
+        return {"linked": False, "summary": "연결된 업로드 작업이 없습니다."}
+
+    platforms = []
+    statuses = []
+    for job in matched_jobs:
+        statuses.append(str(job.get("status", "")).strip())
+        targets = job.get("targets", {})
+        if isinstance(targets, dict):
+            for platform_name, payload in targets.items():
+                if isinstance(payload, dict) and payload.get("selected"):
+                    platforms.append(_platform_label(platform_name))
+    platform_summary = ", ".join(_dedupe_preserving_order(platforms)) or "플랫폼 정보 없음"
+    status_summary = ", ".join(_dedupe_preserving_order(statuses))
+    return {
+        "linked": True,
+        "summary": f"큐 연결됨 ({status_summary} / {platform_summary})",
+    }
 
 
 def _build_next_actions(
