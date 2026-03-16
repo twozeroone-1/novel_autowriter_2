@@ -122,7 +122,7 @@ class TestEpisodeWorkflow(unittest.TestCase):
 
         self.assertEqual(snapshot["steps"][2]["state"], "차단")
         self.assertEqual(snapshot["steps"][3]["state"], "대기")
-        self.assertEqual(snapshot["next_actions"][0], "원고 검수 또는 회차 생성에서 품질 차단 사유를 먼저 해결하세요.")
+        self.assertEqual(snapshot["next_actions"][0], "고급: 원고 검수에서 품질 차단 사유를 먼저 해결하세요.")
         self.assertEqual(snapshot["shortcut_actions"][0]["label"], "고급: 원고 검수 열기")
 
     def test_snapshot_surfaces_draft_preview_path_and_queue_linkage_for_latest_episode(self):
@@ -181,6 +181,7 @@ class TestEpisodeWorkflow(unittest.TestCase):
             publishing_history=[],
         )
 
+        self.assertEqual(snapshot["next_actions"][0], "고급: 회차 생성에서 새 초안을 만들고 저장하세요.")
         self.assertEqual(snapshot["shortcut_actions"][0]["label"], "고급: 회차 생성 열기")
 
 

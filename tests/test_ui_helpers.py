@@ -30,6 +30,7 @@ if "dotenv" not in sys.modules:
 from core.token_budget import get_field_stats
 import ui.app as app_module
 from ui.app import (
+    APP_DESCRIPTION,
     PROJECT_SETTINGS_SUBSECTION_LABELS,
     PROJECT_STATE_KEYS,
     PROJECT_TAB_LABELS,
@@ -385,6 +386,12 @@ class TestUiHelpers(unittest.TestCase):
                 "자동화/진단",
                 "발행 운영",
             ),
+        )
+
+    def test_app_description_prefers_workflow_and_operations_language(self):
+        self.assertEqual(
+            APP_DESCRIPTION,
+            "현재 선택한 작품 환경에서 운영 상태, 회차 워크플로, 발행 준비를 확인하고 필요할 때만 세부 편집을 진행합니다.",
         )
 
     def test_project_settings_subsection_labels_follow_secondary_navigation_order(self):

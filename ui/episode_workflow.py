@@ -448,13 +448,13 @@ def _build_next_actions(
     actions: list[str] = []
 
     if not latest_episode:
-        actions.append("회차 생성 탭에서 새 초안을 만들고 저장하세요.")
+        actions.append("고급: 회차 생성에서 새 초안을 만들고 저장하세요.")
         return actions
 
     if quality_status == "hard_fail":
-        actions.append("원고 검수 또는 회차 생성에서 품질 차단 사유를 먼저 해결하세요.")
+        actions.append("고급: 원고 검수에서 품질 차단 사유를 먼저 해결하세요.")
     elif not quality_status:
-        actions.append("외부 플랫폼 업로드를 실행해 품질 게이트를 먼저 통과시키세요.")
+        actions.append("발행 운영에서 품질 게이트를 먼저 통과시키세요.")
     elif quality_status == "publishable" and package_count == 0:
         actions.append("외부 플랫폼 업로드에서 업로드 큐를 추가해 발행 패키지를 만드세요.")
 

@@ -152,6 +152,7 @@ PROJECT_SETTINGS_SUBSECTION_LABELS = (
     "아이디어/제목",
     "대형 플롯",
 )
+APP_DESCRIPTION = "현재 선택한 작품 환경에서 운영 상태, 회차 워크플로, 발행 준비를 확인하고 필요할 때만 세부 편집을 진행합니다."
 HIDDEN_PROJECT_NAMES = {"default_project", "sample"}
 PROJECT_NAME_PATTERN = re.compile(r"^[0-9A-Za-z\uAC00-\uD7A3 _-]{1,50}$")
 
@@ -317,7 +318,7 @@ def main() -> None:
     app = build_app_services(current_project)
 
     st.title(f"AI 소설 스튜디오 - [{current_project}]")
-    st.markdown("현재 선택한 작품 환경에서 설정 관리, 회차 생성, 검수, 아이디어와 플롯 설계를 진행합니다.")
+    st.markdown(APP_DESCRIPTION)
 
     tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(PROJECT_TAB_LABELS)
 
