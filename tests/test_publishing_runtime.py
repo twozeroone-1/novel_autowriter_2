@@ -829,6 +829,121 @@ class TestPublishingRuntime(unittest.TestCase):
         self.assertEqual(executor.call_count, 1)
         self.assertEqual(executor.last_job["source_override"]["content"], repaired_content)
 
+    def test_tick_uses_regenerated_final_source_for_executor_payload(self):
+        module = importlib.import_module("core.publishing_runtime")
+        runtime_cls = getattr(module, "PublishingRuntime")
+        now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
+        regenerated_content = "# 12화. 계약의 대가\n\n" + "\n".join(f"재생성 장면 {index}" for index in range(80))
+        executor = FakePublishingExecutor(
+            result={
+                "platform_results": {
+                    "munpia": {"status": "done", "success": True},
+                },
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            self._write_chapter(projects_dir)
+            with patch("core.publishing_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.chapter_source.DATA_PROJECTS_DIR", projects_dir
+            ), patch("core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.canon_store.DATA_PROJECTS_DIR", projects_dir
+            ), patch.object(
+                module,
+                "evaluate_release_policy",
+                return_value={
+                    "action": "run_now",
+                    "reason": "",
+                    "allowed_platforms": ["munpia"],
+                    "blocked_platforms": {},
+                    "burst_slot": False,
+                    "next_runtime_status": "idle",
+                },
+            ), patch.object(
+                module,
+                "select_runnable_job",
+                return_value={
+                    "action": "run_now",
+                    "reason": "",
+                    "job": {
+                        "id": "pub-regen",
+                        "source_path": "chapters/12화.md",
+                        "chapter_title": "Episode 12",
+                        "status": "pending",
+                        "attempt_count": 0,
+                        "targets": {"munpia": {"selected": True, "status": "pending"}},
+                    },
+                },
+            ), patch.object(
+                module,
+                "evaluate_quality_gate",
+                return_value={
+                    "status": "publishable",
+                    "attempted_repair": False,
+                    "attempted_regenerate": True,
+                    "final_source": {
+                        "title": "12화. 계약의 대가",
+                        "content": regenerated_content,
+                    },
+                    "gate_reports": {
+                        "initial": {
+                            "rules": {"status": "passed", "errors": []},
+                            "structure": {"status": "passed", "errors": []},
+                            "critic": {"status": "blocked", "issues": ["episode objective missing"]},
+                        },
+                        "final": {
+                            "rules": {"status": "passed", "errors": []},
+                            "structure": {"status": "passed", "errors": []},
+                            "critic": {"status": "passed", "issues": []},
+                        },
+                        "regenerated": {
+                            "rules": {"status": "passed", "errors": []},
+                            "structure": {"status": "passed", "errors": []},
+                            "critic": {"status": "passed", "issues": []},
+                        },
+                    },
+                    "errors": [],
+                    "repair_summary": {"status": "not_needed", "reason": ""},
+                    "regeneration_summary": {"status": "applied", "reason": "critic-blocked draft regenerated"},
+                },
+            ), patch.object(
+                module,
+                "summarize_publish_attempt",
+                return_value={
+                    "job_status": "done",
+                    "runtime_status": "idle",
+                    "incident_type": "",
+                    "needs_user_action": False,
+                    "last_error": "",
+                },
+            ), patch.object(module, "finalize_publish_canon", return_value={"status": "skipped"}):
+                store = PublishingStore(project_name="sample")
+                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                store.save_queue(
+                    [
+                        {
+                            "id": "pub-regen",
+                            "source_path": "chapters/12화.md",
+                            "chapter_title": "Episode 12",
+                            "status": "pending",
+                            "attempt_count": 0,
+                            "targets": {"munpia": {"selected": True, "status": "pending"}},
+                        }
+                    ]
+                )
+                runtime = runtime_cls(store=store, executor=executor)
+
+                runtime.tick(now=now)
+
+                run_dirs = list((projects_dir / "sample" / "runs").glob("*"))
+                quality_report = json.loads((run_dirs[0] / "quality_report.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(executor.call_count, 1)
+        self.assertEqual(executor.last_job["source_override"]["content"], regenerated_content)
+        self.assertTrue(quality_report["attempted_regenerate"])
+        self.assertEqual(quality_report["regeneration_summary"]["status"], "applied")
+
     def test_tick_writes_orchestrator_report_to_quality_snapshot(self):
         module = importlib.import_module("core.publishing_runtime")
         runtime_cls = getattr(module, "PublishingRuntime")
