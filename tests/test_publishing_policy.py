@@ -1,7 +1,6 @@
 import importlib
 import importlib.util
 import unittest
-from datetime import datetime
 
 
 class TestPublishingPolicy(unittest.TestCase):
@@ -13,49 +12,54 @@ class TestPublishingPolicy(unittest.TestCase):
         self.assertIsNotNone(selector, "select_runnable_job should exist")
         return selector
 
-    def test_select_runnable_job_skips_when_disabled(self):
+    def test_select_runnable_job_returns_first_job_with_allowed_selected_target(self):
         select_runnable_job = self._load_selector()
 
         decision = select_runnable_job(
-            config={"enabled": False, "schedule": {"type": "daily", "time": "21:00", "days": [], "hours": 24}},
-            runtime={"status": "idle", "last_run_at": None},
-            queue=[{"id": "job-1", "status": "pending"}],
-            now=datetime(2026, 3, 16, 21, 0),
-        )
-
-        self.assertEqual(decision["action"], "skip")
-        self.assertEqual(decision["reason"], "disabled")
-
-    def test_select_runnable_job_skips_when_runtime_is_paused(self):
-        select_runnable_job = self._load_selector()
-
-        decision = select_runnable_job(
-            config={"enabled": True, "schedule": {"type": "daily", "time": "21:00", "days": [], "hours": 24}},
-            runtime={"status": "paused", "last_run_at": None},
-            queue=[{"id": "job-1", "status": "pending"}],
-            now=datetime(2026, 3, 16, 21, 0),
-        )
-
-        self.assertEqual(decision["action"], "skip")
-        self.assertEqual(decision["reason"], "paused")
-
-    def test_select_runnable_job_returns_first_pending_or_partial_failed_job_when_due(self):
-        select_runnable_job = self._load_selector()
-
-        decision = select_runnable_job(
-            config={"enabled": True, "schedule": {"type": "daily", "time": "21:00", "days": [], "hours": 24}},
-            runtime={"status": "idle", "last_run_at": None},
             queue=[
-                {"id": "job-1", "status": "done"},
-                {"id": "job-2", "status": "partial_failed"},
-                {"id": "job-3", "status": "pending"},
+                {"id": "job-1", "status": "pending", "targets": {"munpia": {"selected": True}}},
+                {"id": "job-2", "status": "pending", "targets": {"novelpia": {"selected": True}}},
             ],
-            now=datetime(2026, 3, 16, 21, 0),
+            allowed_platforms={"novelpia"},
         )
 
         self.assertEqual(decision["action"], "run_now")
-        self.assertEqual(decision["reason"], "")
         self.assertEqual(decision["job"]["id"], "job-2")
+
+    def test_select_runnable_job_skips_when_no_job_matches_allowed_platforms(self):
+        select_runnable_job = self._load_selector()
+
+        decision = select_runnable_job(
+            queue=[
+                {"id": "job-1", "status": "pending", "targets": {"munpia": {"selected": True}}},
+            ],
+            allowed_platforms={"novelpia"},
+        )
+
+        self.assertEqual(decision["action"], "skip")
+        self.assertEqual(decision["reason"], "no_job")
+
+    def test_select_runnable_job_ignores_jobs_without_selected_allowed_targets(self):
+        select_runnable_job = self._load_selector()
+
+        decision = select_runnable_job(
+            queue=[
+                {"id": "job-1", "status": "partial_failed", "targets": {"munpia": {"selected": False}}},
+                {"id": "job-2", "status": "done", "targets": {"novelpia": {"selected": True}}},
+                {
+                    "id": "job-3",
+                    "status": "partial_failed",
+                    "targets": {
+                        "munpia": {"selected": True},
+                        "novelpia": {"selected": False},
+                    },
+                },
+            ],
+            allowed_platforms={"munpia"},
+        )
+
+        self.assertEqual(decision["action"], "run_now")
+        self.assertEqual(decision["job"]["id"], "job-3")
 
 
 if __name__ == "__main__":

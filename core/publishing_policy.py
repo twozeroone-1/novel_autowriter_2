@@ -1,23 +1,19 @@
-from datetime import datetime
+def select_runnable_job(*, queue: list[dict], allowed_platforms: set[str]) -> dict:
+    for item in queue:
+        if item.get("status", "pending") not in {"pending", "partial_failed"}:
+            continue
+        if _job_has_allowed_selected_target(item, allowed_platforms):
+            return {"action": "run_now", "reason": "", "job": item}
+    return {"action": "skip", "reason": "no_job", "job": None}
 
-from core.automation_scheduler import is_schedule_due
 
-
-def select_runnable_job(*, config: dict, runtime: dict, queue: list[dict], now: datetime) -> dict:
-    if not config.get("enabled", False):
-        return {"action": "skip", "reason": "disabled", "job": None}
-
-    runtime_status = str(runtime.get("status", "idle") or "idle")
-    if runtime_status == "paused":
-        return {"action": "skip", "reason": "paused", "job": None}
-    if runtime_status == "running":
-        return {"action": "skip", "reason": "running", "job": None}
-
-    if not is_schedule_due(config.get("schedule", {}), now=now, last_run_at=runtime.get("last_run_at")):
-        return {"action": "skip", "reason": "not_due", "job": None}
-
-    job = next((item for item in queue if item.get("status", "pending") in {"pending", "partial_failed"}), None)
-    if job is None:
-        return {"action": "skip", "reason": "no_job", "job": None}
-
-    return {"action": "run_now", "reason": "", "job": job}
+def _job_has_allowed_selected_target(job: dict, allowed_platforms: set[str]) -> bool:
+    targets = job.get("targets")
+    if not isinstance(targets, dict):
+        return False
+    for platform_name, target in targets.items():
+        if str(platform_name) not in allowed_platforms:
+            continue
+        if isinstance(target, dict) and target.get("selected", False):
+            return True
+    return False
