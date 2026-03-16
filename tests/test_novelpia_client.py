@@ -452,7 +452,29 @@ class TestNovelpiaClient(unittest.TestCase):
 
         self.assertTrue(result.success)
 
-    def test_set_publish_options_rejects_reserved_mode(self):
+    def test_set_publish_options_accepts_reserved_mode_with_reserved_at(self):
+        from core.platform_clients.novelpia import NovelpiaClient
+
+        client = NovelpiaClient(
+            username="writer-id",
+            password="secret",
+            browser_session=FakeBrowserSession(),
+            platform_config={
+                "upload_url_template": "https://novelpia.com/mynovel/all/write/{work_id}",
+            },
+        )
+
+        result = client.set_publish_options(
+            {
+                "publish_mode": "reserved",
+                "visibility": "private",
+                "reserved_at": "2026-03-16T21:00:00+09:00",
+            }
+        )
+
+        self.assertTrue(result.success)
+
+    def test_set_publish_options_requires_reserved_at_for_reserved_mode(self):
         from core.platform_clients.novelpia import NovelpiaClient
 
         client = NovelpiaClient(
@@ -469,7 +491,7 @@ class TestNovelpiaClient(unittest.TestCase):
                 {
                     "publish_mode": "reserved",
                     "visibility": "private",
-                    "reserved_at": "2026-03-16T21:00:00+09:00",
+                    "reserved_at": None,
                 }
             )
 
@@ -508,6 +530,44 @@ class TestNovelpiaClient(unittest.TestCase):
             ("select_option", "#content_cate", "5"),
             browser.actions,
         )
+
+    def test_upload_episode_applies_reserved_publish_controls_when_configured(self):
+        from core.platform_clients.novelpia import NovelpiaClient
+
+        browser = FakeBrowserSession(click_url="https://novelpia.com/mynovel/all/416704?scheduled=1")
+        client = NovelpiaClient(
+            username="writer-id",
+            password="secret",
+            browser_session=browser,
+            platform_config={
+                "upload_url_template": "https://novelpia.com/mynovel/all/write/{work_id}",
+                "selectors": {
+                    "episode_publish_mode_reserved": "#reserve-mode",
+                    "episode_reserved_date": "#reserve-date",
+                    "episode_reserved_time": "#reserve-time",
+                },
+            },
+        )
+
+        client.set_publish_options(
+            {
+                "publish_mode": "reserved",
+                "visibility": "private",
+                "reserved_at": "2026-03-16T21:30:00+09:00",
+            }
+        )
+        client.upload_episode(
+            EpisodeUploadRequest(
+                work_id="416704",
+                episode_title="Episode 12",
+                content="body",
+                visibility="public",
+            )
+        )
+
+        self.assertIn(("click", "#reserve-mode", ""), browser.actions)
+        self.assertIn(("fill", "#reserve-date", "2026-03-16"), browser.actions)
+        self.assertIn(("fill", "#reserve-time", "21:30"), browser.actions)
 
     def test_upload_episode_dismisses_event_overlay_when_present(self):
         from core.platform_clients.novelpia import NovelpiaClient
@@ -625,6 +685,32 @@ class TestNovelpiaClient(unittest.TestCase):
             proc_client.verify_publication({"work_id": "416704", "episode_id": "5471585"})
 
         self.assertEqual(proc_context.exception.error_type, "retryable")
+
+    def test_verify_publication_returns_scheduled_for_reserved_confirmation_url(self):
+        from core.platform_clients.novelpia import NovelpiaClient
+
+        browser = FakeBrowserSession()
+        browser.current_url = "https://novelpia.com/mynovel/all/416704?scheduled=1"
+        client = NovelpiaClient(
+            username="writer-id",
+            password="secret",
+            browser_session=browser,
+            platform_config={
+                "upload_url_template": "https://novelpia.com/mynovel/all/write/{work_id}",
+            },
+        )
+
+        result = client.verify_publication(
+            {
+                "work_id": "416704",
+                "episode_id": "",
+                "publish_mode": "reserved",
+                "reserved_at": "2026-03-16T21:00:00+09:00",
+            }
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.status, "scheduled")
 
 
 if __name__ == "__main__":

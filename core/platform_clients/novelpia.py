@@ -1,3 +1,4 @@
+from datetime import datetime
 from urllib.parse import urlparse
 import re
 
@@ -140,16 +141,23 @@ class NovelpiaClient(BasePlatformClient):
             browser.goto(editor_url)
             browser.fill(selectors["episode_title"], request.episode_title)
             browser.fill(selectors["episode_body"], request.content)
+            pending_options = self._pending_publish_options if isinstance(self._pending_publish_options, dict) else {}
+            effective_publish_mode = (
+                str(pending_options.get("publish_mode", "")).strip().lower() or request.publish_mode
+            )
             if hasattr(browser, "select_option"):
                 effective_visibility = (
-                    str(self._pending_publish_options.get("visibility", "")).strip()
-                    if isinstance(self._pending_publish_options, dict)
-                    else ""
-                ) or request.visibility
+                    str(pending_options.get("visibility", "")).strip() or request.visibility
+                )
                 browser.select_option(
                     selectors["episode_category"],
                     _content_category_value(effective_visibility),
                 )
+            if effective_publish_mode == "reserved":
+                reserved_date, reserved_time = _reserved_date_and_time(pending_options)
+                browser.click(_required_selector(selectors, "episode_publish_mode_reserved"))
+                browser.fill(_required_selector(selectors, "episode_reserved_date"), reserved_date)
+                browser.fill(_required_selector(selectors, "episode_reserved_time"), reserved_time)
             if hasattr(browser, "click_if_present"):
                 dismissed = browser.click_if_present(selectors["dismiss_event_overlay"], timeout_ms=2000)
                 if not dismissed:
@@ -161,7 +169,7 @@ class NovelpiaClient(BasePlatformClient):
                         "Novelpia episode submission did not leave the editor page.",
                         error_type="retryable",
                     )
-                if browser.current_url.endswith("write_proc") and not browser.wait_for_url_change(
+                if effective_publish_mode != "reserved" and browser.current_url.endswith("write_proc") and not browser.wait_for_url_change(
                     browser.current_url,
                     timeout_ms=10000,
                 ):
@@ -189,13 +197,14 @@ class NovelpiaClient(BasePlatformClient):
     def set_publish_options(self, payload: dict) -> PlatformActionResult:
         options = _normalize_publish_options(payload)
         if options["publish_mode"] == "reserved":
-            raise PlatformError("Novelpia reserved scheduling is not configured.", error_type="requires_user_action")
+            options["reserved_at"] = _normalize_reserved_at(options.get("reserved_at"))
         self._pending_publish_options = options
         return PlatformActionResult(status="done", success=True)
 
     def verify_publication(self, expected: dict) -> PlatformActionResult:
         work_id = str(expected.get("work_id", "")).strip()
         episode_id = str(expected.get("episode_id", "")).strip()
+        publish_mode = str(expected.get("publish_mode", "immediate") or "immediate").strip().lower()
         current_url = str(getattr(self._get_browser(), "current_url", "")).strip()
         editor_url = _episode_editor_url(str(self.platform_config.get("upload_url_template", "")).strip(), work_id)
 
@@ -203,6 +212,13 @@ class NovelpiaClient(BasePlatformClient):
             raise PlatformError(
                 "Novelpia publication verification did not reach the viewer page.",
                 error_type="retryable",
+            )
+        if publish_mode == "reserved" and _looks_like_reserved_confirmation(current_url=current_url, work_id=work_id):
+            return PlatformActionResult(
+                status="scheduled",
+                success=True,
+                work_id=work_id,
+                episode_id=episode_id,
             )
         if episode_id and episode_id not in current_url:
             raise PlatformError(
@@ -384,6 +400,38 @@ def _hashtag_values(main_genre: str, configured_hashtags) -> list[str]:
         if len(selected) >= 2:
             break
     return selected
+
+
+def _normalize_reserved_at(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise PlatformError("Novelpia reserved publish requires a reservation time.", error_type="requires_user_action")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise PlatformError("Novelpia reserved publish time is invalid.", error_type="requires_user_action") from exc
+    return parsed.isoformat()
+
+
+def _reserved_date_and_time(options: dict) -> tuple[str, str]:
+    reserved_at = _normalize_reserved_at(options.get("reserved_at"))
+    parsed = datetime.fromisoformat(reserved_at)
+    return parsed.date().isoformat(), parsed.strftime("%H:%M")
+
+
+def _required_selector(selectors: dict, key: str) -> str:
+    selector = str(selectors.get(key, "")).strip()
+    if selector:
+        return selector
+    raise PlatformError(f"Novelpia reserved selector '{key}' is not configured.", error_type="requires_user_action")
+
+
+def _looks_like_reserved_confirmation(*, current_url: str, work_id: str) -> bool:
+    lowered = current_url.lower()
+    if any(token in lowered for token in ("scheduled", "schedule", "reserved", "reserve")):
+        return True
+    if work_id and f"/mynovel/all/{work_id}" in lowered and "/mynovel/all/write/" not in lowered:
+        return True
+    return False
 
 
 def _episode_editor_url(upload_url_template: str, work_id: str) -> str:

@@ -147,10 +147,13 @@ class PublishingRuntime:
             runtime_status = "idle"
             incident_type = ""
         last_error = str(publish_summary.get("last_error", "")).strip()
+        canon_overall_status = (
+            "scheduled" if overall_status == "done" and _has_scheduled_selected_targets(job=job) else overall_status
+        )
         canon_update_report = finalize_publish_canon(
             project_name=self.store.project_name,
             episode_id=str(job.get("episode_id", "")).strip(),
-            overall_status=overall_status,
+            overall_status=canon_overall_status,
             job=job,
             result=result,
             source_payload=quality_source,
@@ -322,6 +325,20 @@ def _has_deferred_selected_targets(*, job: dict, allowed_platforms: set[str]) ->
         if not target.get("selected", False):
             continue
         if str(platform_name) not in allowed_platforms:
+            return True
+    return False
+
+
+def _has_scheduled_selected_targets(*, job: dict) -> bool:
+    targets = job.get("targets")
+    if not isinstance(targets, dict):
+        return False
+    for target in targets.values():
+        if not isinstance(target, dict):
+            continue
+        if not target.get("selected", False):
+            continue
+        if str(target.get("status", "")).strip().lower() == "scheduled":
             return True
     return False
 

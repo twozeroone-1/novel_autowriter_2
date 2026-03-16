@@ -24,6 +24,18 @@ class TestPublishingIncidents(unittest.TestCase):
         self.assertEqual(summary["runtime_status"], "idle")
         self.assertEqual(summary["incident_type"], "")
 
+    def test_summarize_publish_attempt_treats_scheduled_as_success(self):
+        summarize_publish_attempt = self._load_summarizer()
+
+        summary = summarize_publish_attempt(
+            job={"targets": {"novelpia": {"selected": True, "status": "scheduled"}}},
+            platform_results={"novelpia": {"status": "scheduled", "success": True}},
+        )
+
+        self.assertEqual(summary["job_status"], "done")
+        self.assertEqual(summary["runtime_status"], "idle")
+        self.assertEqual(summary["incident_type"], "")
+
     def test_summarize_publish_attempt_marks_paused_for_requires_user_action(self):
         summarize_publish_attempt = self._load_summarizer()
 

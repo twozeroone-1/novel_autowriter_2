@@ -186,6 +186,53 @@ class TestPublishingExecutor(unittest.TestCase):
         self.assertIn(("set_publish_options", "reserved", "private", "2026-03-16T21:00:00+09:00"), fake_client.calls)
         self.assertNotIn(("upload_episode", "work-1", "Episode 12", "# 12화. 계약의 대가\n\n본문"), fake_client.calls)
 
+    def test_publish_job_preserves_scheduled_verification_result(self):
+        from core.publishing_executor import PublishingExecutor
+
+        fake_client = FakeClient(
+            episode_id="",
+            verification_result=PlatformActionResult(status="scheduled", success=True, work_id="work-1"),
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            chapter_path = projects_dir / "sample" / "chapters" / "12화.md"
+            chapter_path.parent.mkdir(parents=True, exist_ok=True)
+            chapter_path.write_text("# 12화. 계약의 대가\n\n본문", encoding="utf-8")
+
+            with patch("core.chapter_source.DATA_PROJECTS_DIR", projects_dir):
+                executor = PublishingExecutor(
+                    project_name="sample",
+                    credential_loader=lambda project_name, platform_name: {"username": "id", "password": "pw"},
+                    client_factory=lambda **kwargs: fake_client,
+                )
+                result = executor.publish_job(
+                    job={
+                        "chapter_title": "Episode 12",
+                        "source_path": "chapters/12화.md",
+                        "targets": {
+                            "novelpia": {
+                                "selected": True,
+                                "work_id": "work-1",
+                                "episode_title": "Episode 12",
+                                "publish_mode": "reserved",
+                                "visibility": "private",
+                                "reserved_at": "2026-03-16T21:00:00+09:00",
+                            }
+                        },
+                    },
+                    config={
+                        "browser": {"headless": True},
+                        "platforms": {
+                            "novelpia": {"enabled": True, "work_id": ""},
+                        },
+                    },
+                )
+
+        self.assertEqual(result["platform_results"]["novelpia"]["status"], "scheduled")
+        self.assertTrue(result["platform_results"]["novelpia"]["success"])
+        self.assertEqual(result["platform_results"]["novelpia"]["verification"]["status"], "scheduled")
+
     def test_publish_job_marks_failed_when_verification_fails(self):
         from core.publishing_executor import PublishingExecutor
 

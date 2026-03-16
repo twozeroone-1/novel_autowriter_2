@@ -1365,6 +1365,92 @@ class TestPublishingRuntime(unittest.TestCase):
 
         finalize_publish_canon.assert_called_once()
 
+    def test_tick_skips_canon_finalize_for_scheduled_platform_success(self):
+        module = importlib.import_module("core.publishing_runtime")
+        runtime_cls = getattr(module, "PublishingRuntime")
+        now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            self._write_chapter(projects_dir)
+            with patch("core.publishing_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.chapter_source.DATA_PROJECTS_DIR", projects_dir
+            ), patch("core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.canon_store.DATA_PROJECTS_DIR", projects_dir
+            ), patch.object(
+                module,
+                "select_runnable_job",
+                return_value={
+                    "action": "run_now",
+                    "reason": "",
+                    "job": {
+                        "id": "pub1",
+                        "episode_id": "ep_012",
+                        "source_path": "chapters/12화.md",
+                        "chapter_title": "Episode 12",
+                        "status": "pending",
+                        "attempt_count": 0,
+                        "targets": {"novelpia": {"selected": True, "status": "pending"}},
+                    },
+                },
+            ), patch.object(
+                module,
+                "evaluate_quality_gate",
+                return_value={
+                    "status": "publishable",
+                    "attempted_repair": False,
+                    "final_source": {
+                        "title": "12화. 계약의 대가",
+                        "content": "# 12화. 계약의 대가\n\n유효한 본문",
+                    },
+                    "gate_reports": {
+                        "initial": {
+                            "rules": {"status": "publishable", "errors": []},
+                            "structure": {"status": "passed", "errors": []},
+                        }
+                    },
+                    "errors": [],
+                    "repair_summary": {"status": "not_needed", "reason": ""},
+                },
+            ):
+                store = PublishingStore(project_name="sample")
+                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                store.save_queue(
+                    [
+                        {
+                            "id": "pub1",
+                            "episode_id": "ep_012",
+                            "source_path": "chapters/12화.md",
+                            "chapter_title": "Episode 12",
+                            "status": "pending",
+                            "attempt_count": 0,
+                            "targets": {"novelpia": {"selected": True, "status": "pending"}},
+                        }
+                    ]
+                )
+                executor = FakePublishingExecutor(
+                    result={
+                        "platform_results": {
+                            "novelpia": {"status": "scheduled", "success": True},
+                        }
+                    }
+                )
+                runtime = runtime_cls(store=store, executor=executor)
+
+                with patch.object(
+                    module,
+                    "finalize_publish_canon",
+                    return_value={"status": "skipped", "source": "none", "candidate": {}, "error": ""},
+                ) as finalize_publish_canon:
+                    runtime.tick(now=now)
+                    queue = store.load_queue()
+                    history = store.load_recent_history(limit=10)
+
+        self.assertEqual(queue[0]["status"], "done")
+        self.assertTrue(history[0]["success"])
+        finalize_publish_canon.assert_called_once()
+        self.assertEqual(finalize_publish_canon.call_args.kwargs["overall_status"], "scheduled")
+
     def test_tick_blocks_publication_when_origin_quality_fails(self):
         runtime_cls = self._load_runtime_cls()
         now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
