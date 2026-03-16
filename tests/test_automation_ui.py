@@ -160,6 +160,51 @@ class TestAutomationUi(unittest.TestCase):
         self.assertEqual(summary["success"], 2)
         self.assertEqual(summary["failure"], 1)
 
+    def test_build_automation_operations_snapshot_marks_warning_when_runtime_is_paused(self):
+        module = self._load_module()
+
+        snapshot = module.build_automation_operations_snapshot(
+            config={
+                "enabled": True,
+                "schedule": {"type": "daily", "time": "21:00"},
+            },
+            queue=[],
+            runtime={"status": "paused", "last_error": "captcha"},
+            history=[],
+            diagnostics_snapshot={
+                "summary_text": "24시간 4건 / 실패 1건 / 최근 api",
+                "status": "warning",
+                "warning_text": "최근 진단 실패 1건",
+            },
+        )
+
+        self.assertEqual(snapshot["runtime_status"], "일시중지: captcha")
+        self.assertEqual(snapshot["pending_job_count"], 0)
+        self.assertIn("일시중지", snapshot["blockers"][0])
+        self.assertIn("paused", snapshot["next_actions"][0])
+
+    def test_build_automation_operations_snapshot_prefers_queue_action_when_idle(self):
+        module = self._load_module()
+
+        snapshot = module.build_automation_operations_snapshot(
+            config={
+                "enabled": True,
+                "schedule": {"type": "interval", "hours": 2},
+            },
+            queue=[],
+            runtime={"status": "idle", "last_error": ""},
+            history=[{"success": True}],
+            diagnostics_snapshot={
+                "summary_text": "24시간 3건 / 실패 0건 / 최근 cli",
+                "status": "healthy",
+                "warning_text": "",
+            },
+        )
+
+        self.assertEqual(snapshot["schedule_summary"], "2시간마다 반복")
+        self.assertEqual(snapshot["diagnostics_summary"], "24시간 3건 / 실패 0건 / 최근 cli")
+        self.assertIn("작업 큐", snapshot["next_actions"][0])
+
 
 if __name__ == "__main__":
     unittest.main()

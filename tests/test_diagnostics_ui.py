@@ -152,6 +152,29 @@ class TestDiagnosticsUi(unittest.TestCase):
         self.assertEqual(rows[1]["context_update"], "legacy: partial_failure / canon: missing")
         self.assertEqual(rows[1]["detail"], "boom")
 
+    def test_build_diagnostics_status_snapshot_marks_warning_when_failures_exist(self):
+        diagnostics_ui = self._load_module()
+
+        snapshot = diagnostics_ui.build_diagnostics_status_snapshot(
+            [
+                {"success": False, "actual_backend": "api"},
+                {"success": True, "actual_backend": "cli"},
+            ]
+        )
+
+        self.assertEqual(snapshot["status"], "warning")
+        self.assertIn("실패 1건", snapshot["summary_text"])
+        self.assertIn("최근 진단 실패", snapshot["warning_text"])
+
+    def test_build_diagnostics_status_snapshot_marks_empty_without_runs(self):
+        diagnostics_ui = self._load_module()
+
+        snapshot = diagnostics_ui.build_diagnostics_status_snapshot([])
+
+        self.assertEqual(snapshot["status"], "empty")
+        self.assertEqual(snapshot["summary_text"], "24시간 0건 / 실패 0건 / 최근 -")
+        self.assertIn("진단 기록", snapshot["recommended_action"])
+
 
 if __name__ == "__main__":
     unittest.main()

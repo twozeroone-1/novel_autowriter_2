@@ -144,7 +144,7 @@ PROJECT_TAB_LABELS = (
     "[2] 회차 생성",
     "[3] 원고 검수",
     "[4] 반자동 연재 모드",
-    "[5] 자동화 연재 모드",
+    "자동화/진단",
     "발행 운영",
 )
 PROJECT_SETTINGS_SUBSECTION_LABELS = (

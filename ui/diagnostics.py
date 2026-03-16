@@ -16,6 +16,36 @@ def format_sidebar_summary(summary: dict) -> str:
     return f"24시간 {summary.get('run_count', 0)}건 / 실패 {summary.get('failure_count', 0)}건 / 최근 {latest_backend}"
 
 
+def build_diagnostics_status_snapshot(records: list[dict]) -> dict[str, str]:
+    summary = build_recent_summary(records)
+    summary_text = format_sidebar_summary(summary)
+    run_count = int(summary.get("run_count", 0) or 0)
+    failure_count = int(summary.get("failure_count", 0) or 0)
+
+    if run_count <= 0:
+        return {
+            "status": "empty",
+            "summary_text": summary_text,
+            "warning_text": "최근 24시간 진단 기록이 없습니다.",
+            "recommended_action": "진단 기록이 없으니 진단 상세를 열어 최근 실행 로그를 확인하세요.",
+        }
+
+    if failure_count > 0:
+        return {
+            "status": "warning",
+            "summary_text": summary_text,
+            "warning_text": f"최근 진단 실패 {failure_count}건이 있습니다.",
+            "recommended_action": "진단 상세를 열어 실패 원인과 fallback 흐름을 확인하세요.",
+        }
+
+    return {
+        "status": "healthy",
+        "summary_text": summary_text,
+        "warning_text": "",
+        "recommended_action": "최근 진단은 안정적입니다.",
+    }
+
+
 def filter_runs(
     runs: list[dict],
     *,
