@@ -18,7 +18,7 @@ DEFAULT_STORY_BIBLE_SHADOW = {
 }
 # Primary public defaults for Story Bible-only settings.
 DEFAULT_STORY_BIBLE_SETTINGS = DEFAULT_STORY_BIBLE_SHADOW
-# Backward-compatible alias for existing tests and callers.
+# Legacy compatibility alias for existing tests and callers.
 DEFAULT_CONFIG = DEFAULT_STORY_BIBLE_SETTINGS
 
 
@@ -280,9 +280,11 @@ class ContextManager:
         return "\n".join(lines)
 
     def get_story_bible_settings(self) -> dict:
+        """primary Story Bible settings read API."""
         return self._build_story_bible_compatibility_view(self._load_story_bible_shadow_payload())
 
     def get_config(self) -> dict:
+        """Legacy compatibility alias for Story Bible settings reads."""
         return self.get_story_bible_settings()
 
     def get_workspace_settings(self) -> dict:
@@ -306,6 +308,7 @@ class ContextManager:
         return self._normalize_characters(self._load_json(self.chars_path))
 
     def save_config(self, config_data: dict) -> None:
+        """Legacy compatibility alias for Story Bible settings writes."""
         normalized = self._normalize_story_bible_shadow_payload(config_data)
         self.save_story_bible_sections(
             worldview=normalized.get("worldview", DEFAULT_STORY_BIBLE_SETTINGS["worldview"]),

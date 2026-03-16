@@ -204,6 +204,18 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(settings["tone_and_manner"], "structured style")
                 self.assertEqual(settings["continuity"], "structured rules")
 
+    def test_default_config_alias_points_to_story_bible_defaults(self):
+        self.assertIs(context_module.DEFAULT_CONFIG, context_module.DEFAULT_STORY_BIBLE_SETTINGS)
+
+    def test_get_story_bible_settings_docstring_marks_primary_api(self):
+        self.assertIn("primary", ContextManager.get_story_bible_settings.__doc__ or "")
+
+    def test_get_config_docstring_marks_compatibility_alias(self):
+        self.assertIn("compatibility", ContextManager.get_config.__doc__ or "")
+
+    def test_save_config_docstring_marks_compatibility_alias(self):
+        self.assertIn("compatibility", ContextManager.save_config.__doc__ or "")
+
     def test_get_story_bible_settings_returns_story_bible_compatibility_view(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
