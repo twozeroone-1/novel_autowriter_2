@@ -25,6 +25,39 @@ class TestPublishingStore(unittest.TestCase):
         self.assertFalse(config["platforms"]["munpia"]["enabled"])
         self.assertFalse(config["platforms"]["novelpia"]["enabled"])
 
+    def test_load_config_bootstraps_config_file_when_missing(self):
+        module = importlib.import_module("core.publishing_store")
+        store_cls = getattr(module, "PublishingStore", None)
+        self.assertIsNotNone(store_cls, "PublishingStore should exist")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            with patch.object(module, "DATA_PROJECTS_DIR", projects_dir):
+                store = store_cls(project_name="sample")
+                self.assertFalse(store.config_path.exists())
+
+                _ = store.load_config()
+
+                self.assertTrue(store.config_path.exists())
+
+    def test_bootstrapped_config_file_contains_default_structure(self):
+        module = importlib.import_module("core.publishing_store")
+        store_cls = getattr(module, "PublishingStore", None)
+        self.assertIsNotNone(store_cls, "PublishingStore should exist")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            with patch.object(module, "DATA_PROJECTS_DIR", projects_dir):
+                store = store_cls(project_name="sample")
+                config = store.load_config()
+                saved = module.json.loads(store.config_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(saved["enabled"], config["enabled"])
+        self.assertIn("platforms", saved)
+        self.assertIn("munpia", saved["platforms"])
+        self.assertIn("novelpia", saved["platforms"])
+        self.assertIn("upload_url_template", saved["platforms"]["munpia"])
+
     def test_save_and_load_queue_round_trip(self):
         module = importlib.import_module("core.publishing_store")
         store_cls = getattr(module, "PublishingStore", None)

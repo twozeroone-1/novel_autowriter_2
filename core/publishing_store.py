@@ -76,9 +76,16 @@ class PublishingStore:
         return self.publishing_dir / "history.jsonl"
 
     def load_config(self) -> dict:
+        self.ensure_config_exists()
         if not self.config_path.exists():
             return deepcopy(DEFAULT_PUBLISHING_CONFIG)
         return _deep_merge_dicts(deepcopy(DEFAULT_PUBLISHING_CONFIG), self._read_json(self.config_path))
+
+    def ensure_config_exists(self) -> None:
+        self.publishing_dir.mkdir(parents=True, exist_ok=True)
+        if self.config_path.exists():
+            return
+        atomic_write_json(self.config_path, deepcopy(DEFAULT_PUBLISHING_CONFIG))
 
     def save_config(self, config: dict) -> None:
         atomic_write_json(self.config_path, config)
