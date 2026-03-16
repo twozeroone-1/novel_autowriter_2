@@ -1298,8 +1298,75 @@ class TestPublishingRuntime(unittest.TestCase):
         self.assertEqual(state["status"], "blocked")
         self.assertTrue(history)
         self.assertFalse(history[0]["success"])
+        self.assertEqual(history[0]["incident_type"], "quality_incident")
         self.assertTrue(run_dirs)
         self.assertEqual(quality_report["status"], "hard_fail")
+
+    def test_tick_sets_runtime_stopped_when_quality_incident_threshold_is_reached(self):
+        module = importlib.import_module("core.publishing_runtime")
+        runtime_cls = getattr(module, "PublishingRuntime")
+        now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            chapter_path = projects_dir / "sample" / "chapters" / "프롤로그.md"
+            chapter_path.parent.mkdir(parents=True, exist_ok=True)
+            chapter_path.write_text("# 프롤로그\n\n짧다", encoding="utf-8")
+
+            with patch("core.publishing_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.chapter_source.DATA_PROJECTS_DIR", projects_dir
+            ), patch("core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.canon_store.DATA_PROJECTS_DIR", projects_dir
+            ), patch("core.release_policy_store.DATA_PROJECTS_DIR", projects_dir):
+                from core.release_policy_store import ReleasePolicyStore
+
+                store = PublishingStore(project_name="sample")
+                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                store.save_queue(
+                    [
+                        {
+                            "id": "pub1",
+                            "episode_id": "ep_000",
+                            "chapter_title": "프롤로그",
+                            "source_path": "chapters/프롤로그.md",
+                            "status": "pending",
+                            "attempt_count": 0,
+                            "targets": {
+                                "munpia": {"selected": True, "status": "pending"},
+                            },
+                        }
+                    ]
+                )
+                policy_store = ReleasePolicyStore(project_name="sample")
+                policy = policy_store.load()
+                policy["global"]["stop_after_quality_incidents"] = 2
+                policy["platforms"]["munpia"]["enabled"] = True
+                policy_store.save(policy)
+                store.append_history(
+                    {
+                        "timestamp": "2026-03-12T20:00:00+00:00",
+                        "job_id": "prev1",
+                        "chapter_title": "이전 실패",
+                        "success": False,
+                        "platform_results": {},
+                        "quality_report": {"status": "hard_fail"},
+                        "publish_quality": {"status": "hard_fail"},
+                        "incident_type": "quality_incident",
+                    }
+                )
+                executor = FakePublishingExecutor()
+                runtime = runtime_cls(store=store, executor=executor)
+
+                runtime.tick(now=now)
+
+                queue = store.load_queue()
+                state = store.load_runtime()
+                history = store.load_recent_history(limit=10)
+
+        self.assertEqual(executor.call_count, 0)
+        self.assertEqual(queue[0]["status"], "failed")
+        self.assertEqual(state["status"], "stopped")
+        self.assertEqual(history[0]["incident_type"], "quality_incident")
 
     def test_tick_preserves_critic_report_in_quality_snapshot(self):
         module = importlib.import_module("core.publishing_runtime")

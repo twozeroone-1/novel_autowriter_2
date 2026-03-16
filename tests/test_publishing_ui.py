@@ -111,6 +111,17 @@ class TestPublishingUi(unittest.TestCase):
 
         self.assertEqual(status, "차단됨: no selected targets")
 
+    def test_format_publishing_runtime_status_reports_stopped_error(self):
+        module = self._load_module()
+        runtime = {
+            "status": "stopped",
+            "last_error": "quality incidents reached threshold",
+        }
+
+        status = module.format_publishing_runtime_status(runtime)
+
+        self.assertEqual(status, "중단됨: quality incidents reached threshold")
+
     def test_build_publishing_history_summary_counts_total_success_and_failure(self):
         module = self._load_module()
 

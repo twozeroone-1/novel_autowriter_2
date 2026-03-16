@@ -11,6 +11,8 @@ DEFAULT_RELEASE_POLICY = {
         "max_daily_releases": 1,
         "burst_allowed": False,
         "cooldown_failures": 2,
+        "stop_after_quality_incidents": 2,
+        "block_platform_after_platform_incidents": 2,
     },
     "platforms": {
         "munpia": {

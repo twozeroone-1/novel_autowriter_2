@@ -83,6 +83,8 @@ def format_publishing_runtime_status(runtime: dict) -> str:
         return f"쿨다운: {error}" if error else "쿨다운"
     if status == "blocked":
         return f"차단됨: {error}" if error else "차단됨"
+    if status == "stopped":
+        return f"중단됨: {error}" if error else "중단됨"
     if status == "paused":
         return f"일시중지: {error}" if error else "일시중지"
     return "대기 중"
@@ -596,7 +598,7 @@ def _render_runtime_and_history(project_name: str, store: PublishingStore, runti
             st.success("업로드 작업을 1회 실행했습니다.")
             st.rerun()
     with action_col2:
-        if st.button("paused 해제", use_container_width=True, key="publishing_resume"):
+        if st.button("런타임 초기화", use_container_width=True, key="publishing_resume"):
             store.save_runtime(
                 {
                     "status": "idle",

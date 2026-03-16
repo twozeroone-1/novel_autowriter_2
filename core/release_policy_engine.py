@@ -14,6 +14,8 @@ def evaluate_release_policy(
     schedule: dict | None = None,
 ) -> dict:
     runtime_status = str(runtime.get("status", "idle") or "idle")
+    if runtime_status == "stopped":
+        return _skip_decision(reason="stopped", next_runtime_status="stopped")
     if runtime_status == "paused":
         return _skip_decision(reason="paused", next_runtime_status="paused")
     if runtime_status == "blocked":
@@ -25,12 +27,26 @@ def evaluate_release_policy(
         if schedule is None or not is_schedule_due(schedule, now=now, last_run_at=last_run_at):
             return _skip_decision(reason="cooldown", next_runtime_status="cooldown")
 
+    quality_stop_threshold = max(0, int((policy.get("global") or {}).get("stop_after_quality_incidents", 0) or 0))
+    if quality_stop_threshold and _count_leading_incident_type(history=history, incident_type="quality_incident") >= quality_stop_threshold:
+        return _skip_decision(reason="stopped", next_runtime_status="stopped")
+
     platform_counts = _collect_today_platform_success_counts(history=history, now=now)
+    blocked_for_incidents = _collect_platform_incident_blocks(
+        history=history,
+        threshold=max(
+            0,
+            int((policy.get("global") or {}).get("block_platform_after_platform_incidents", 0) or 0),
+        ),
+    )
     allowed_platforms: list[str] = []
     blocked_platforms: dict[str, str] = {}
     burst_slot = False
 
     for platform_name, platform_policy in (policy.get("platforms") or {}).items():
+        if str(platform_name) in blocked_for_incidents:
+            blocked_platforms[str(platform_name)] = blocked_for_incidents[str(platform_name)]
+            continue
         allowed, reason, uses_burst_slot = _platform_is_allowed_now(
             policy=policy,
             platform_name=str(platform_name),
@@ -73,6 +89,42 @@ def _collect_today_platform_success_counts(*, history: list[dict], now: datetime
             if isinstance(result, dict) and result.get("success") is True:
                 counts[str(platform_name)] += 1
     return dict(counts)
+
+
+def _count_leading_incident_type(*, history: list[dict], incident_type: str) -> int:
+    count = 0
+    for record in history:
+        if str(record.get("incident_type", "")).strip() != incident_type:
+            break
+        count += 1
+    return count
+
+
+def _collect_platform_incident_blocks(*, history: list[dict], threshold: int) -> dict[str, str]:
+    if threshold <= 0:
+        return {}
+
+    streaks: defaultdict[str, int] = defaultdict(int)
+    resolved: set[str] = set()
+    blocked: dict[str, str] = {}
+    for record in history:
+        if str(record.get("incident_type", "")).strip() != "platform_incident":
+            break
+        platform_results = record.get("platform_results")
+        if not isinstance(platform_results, dict):
+            continue
+        for platform_name, payload in platform_results.items():
+            name = str(platform_name)
+            if name in resolved:
+                continue
+            if isinstance(payload, dict) and payload.get("success") is True:
+                resolved.add(name)
+                streaks.pop(name, None)
+                continue
+            streaks[name] += 1
+            if streaks[name] >= threshold:
+                blocked[name] = "incident_threshold_reached"
+    return blocked
 
 
 def _platform_is_allowed_now(*, policy: dict, platform_name: str, platform_policy: dict, success_count: int) -> tuple[bool, str, bool]:

@@ -22,6 +22,9 @@ DEFAULT_PUBLISHING_RUNTIME_STATE = {
 }
 
 
+QUALITY_INCIDENT_TYPE = "quality_incident"
+
+
 class PublishingRuntime:
     def __init__(self, store: PublishingStore, executor):
         self.store = store
@@ -85,9 +88,18 @@ class PublishingRuntime:
         self.snapshot_store.write_json_snapshot(run_id, "quality_report.json", quality_report)
         if publish_quality.get("status") != "publishable":
             last_error = "; ".join(str(item) for item in publish_quality.get("errors", []))
+            release_policy = self._load_effective_release_policy(config=config, queue=queue)
+            history = self.store.load_recent_history(limit=100)
+            quality_stop_threshold = max(
+                0,
+                int((release_policy.get("global") or {}).get("stop_after_quality_incidents", 0) or 0),
+            )
+            should_stop = quality_stop_threshold and (
+                _count_leading_quality_incidents(history=history) + 1 >= quality_stop_threshold
+            )
             job["status"] = "failed"
             job["last_error"] = last_error
-            runtime["status"] = "blocked"
+            runtime["status"] = "stopped" if should_stop else "blocked"
             runtime["current_job_id"] = None
             runtime["last_run_at"] = now.isoformat()
             runtime["last_error"] = last_error
@@ -102,6 +114,7 @@ class PublishingRuntime:
                     "platform_results": {},
                     "quality_report": quality_report,
                     "publish_quality": publish_quality,
+                    "incident_type": QUALITY_INCIDENT_TYPE,
                 }
             )
             return
@@ -261,6 +274,15 @@ def _resolve_queue_job(queue: list[dict], selected_job: dict | None) -> dict | N
     if selected_job in queue:
         return selected_job
     return None
+
+
+def _count_leading_quality_incidents(*, history: list[dict]) -> int:
+    count = 0
+    for record in history:
+        if str(record.get("incident_type", "")).strip() != QUALITY_INCIDENT_TYPE:
+            break
+        count += 1
+    return count
 
 
 def _collect_queue_selected_platforms(queue: list[dict]) -> set[str]:

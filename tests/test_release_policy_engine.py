@@ -5,6 +5,22 @@ from core.release_policy_engine import evaluate_release_policy
 
 
 class TestReleasePolicyEngine(unittest.TestCase):
+    def test_evaluate_release_policy_skips_when_runtime_is_stopped(self):
+        decision = evaluate_release_policy(
+            policy={
+                "global": {"burst_allowed": False, "stop_after_quality_incidents": 2},
+                "platforms": {"munpia": {"enabled": True, "max_daily_releases": 1}},
+            },
+            runtime={"status": "stopped", "last_run_at": None, "last_error": "quality incidents"},
+            history=[],
+            now=datetime(2026, 3, 16, 21, 0, tzinfo=timezone.utc),
+            force=False,
+        )
+
+        self.assertEqual(decision["action"], "skip")
+        self.assertEqual(decision["reason"], "stopped")
+        self.assertEqual(decision["next_runtime_status"], "stopped")
+
     def test_evaluate_release_policy_skips_when_runtime_is_paused(self):
         decision = evaluate_release_policy(
             policy={
@@ -79,6 +95,37 @@ class TestReleasePolicyEngine(unittest.TestCase):
         self.assertEqual(decision["reason"], "blocked")
         self.assertEqual(decision["next_runtime_status"], "blocked")
 
+    def test_evaluate_release_policy_stops_after_repeated_quality_incidents(self):
+        history = [
+            {
+                "timestamp": "2026-03-16T20:00:00+00:00",
+                "incident_type": "quality_incident",
+                "success": False,
+                "platform_results": {},
+            },
+            {
+                "timestamp": "2026-03-16T19:00:00+00:00",
+                "incident_type": "quality_incident",
+                "success": False,
+                "platform_results": {},
+            },
+        ]
+
+        decision = evaluate_release_policy(
+            policy={
+                "global": {"burst_allowed": False, "stop_after_quality_incidents": 2},
+                "platforms": {"munpia": {"enabled": True, "max_daily_releases": 1}},
+            },
+            runtime={"status": "idle", "last_run_at": "2026-03-16T20:00:00+00:00"},
+            history=history,
+            now=datetime(2026, 3, 16, 21, 0, tzinfo=timezone.utc),
+            force=False,
+        )
+
+        self.assertEqual(decision["action"], "skip")
+        self.assertEqual(decision["reason"], "stopped")
+        self.assertEqual(decision["next_runtime_status"], "stopped")
+
     def test_evaluate_release_policy_cools_down_until_next_schedule_window(self):
         decision = evaluate_release_policy(
             policy={
@@ -121,6 +168,47 @@ class TestReleasePolicyEngine(unittest.TestCase):
         self.assertEqual(decision["action"], "skip")
         self.assertEqual(decision["reason"], "no_allowed_platforms")
         self.assertEqual(decision["blocked_platforms"]["munpia"], "daily_limit_reached")
+
+    def test_evaluate_release_policy_blocks_only_platform_with_repeated_platform_incidents(self):
+        history = [
+            {
+                "timestamp": "2026-03-16T20:00:00+00:00",
+                "incident_type": "platform_incident",
+                "success": False,
+                "platform_results": {
+                    "munpia": {"success": False, "status": "failed"},
+                },
+            },
+            {
+                "timestamp": "2026-03-16T19:00:00+00:00",
+                "incident_type": "platform_incident",
+                "success": False,
+                "platform_results": {
+                    "munpia": {"success": False, "status": "failed"},
+                },
+            },
+        ]
+
+        decision = evaluate_release_policy(
+            policy={
+                "global": {
+                    "burst_allowed": False,
+                    "block_platform_after_platform_incidents": 2,
+                },
+                "platforms": {
+                    "munpia": {"enabled": True, "max_daily_releases": 1},
+                    "novelpia": {"enabled": True, "max_daily_releases": 1},
+                },
+            },
+            runtime={"status": "idle", "last_run_at": "2026-03-16T20:00:00+00:00"},
+            history=history,
+            now=datetime(2026, 3, 16, 21, 0, tzinfo=timezone.utc),
+            force=False,
+        )
+
+        self.assertEqual(decision["action"], "run_now")
+        self.assertEqual(decision["allowed_platforms"], ["novelpia"])
+        self.assertEqual(decision["blocked_platforms"]["munpia"], "incident_threshold_reached")
 
 
 if __name__ == "__main__":
