@@ -62,6 +62,12 @@ def build_episode_workflow_snapshot(
         pending_job_count=count_pending_publishing_jobs(publishing_queue),
         history_count=len(publishing_history),
     )
+    shortcut_actions = _build_shortcut_actions(
+        latest_episode=latest_episode,
+        quality_status=quality_status,
+        package_count=package_count,
+        pending_job_count=count_pending_publishing_jobs(publishing_queue),
+    )
 
     summary_lines = _dedupe_preserving_order(
         [
@@ -79,6 +85,7 @@ def build_episode_workflow_snapshot(
         "steps": steps,
         "summary_lines": tuple(summary_lines),
         "next_actions": tuple(next_actions),
+        "shortcut_actions": tuple(shortcut_actions),
         "episode_plan_preview": latest_episode_plan if isinstance(latest_episode_plan, dict) else {},
         "quality_report_preview": latest_quality_report if isinstance(latest_quality_report, dict) else {},
         "packager_report_preview": latest_packager_report if isinstance(latest_packager_report, dict) else {},
@@ -119,6 +126,10 @@ def render_episode_workflow(app) -> None:
         st.subheader("다음 권장 작업")
         for action in snapshot["next_actions"]:
             st.markdown(f"- {action}")
+
+        st.subheader("바로가기 액션")
+        for action in snapshot["shortcut_actions"]:
+            st.markdown(f"- **{action['label']}**: {action['description']}")
 
     with right_col:
         st.subheader("단계 상세")
@@ -457,6 +468,73 @@ def _build_next_actions(
         actions.append("최근 회차 워크플로는 안정적입니다. 다음 회차 계획을 준비하세요.")
 
     return _dedupe_preserving_order(actions)
+
+
+def _build_shortcut_actions(
+    *,
+    latest_episode: dict,
+    quality_status: str,
+    package_count: int,
+    pending_job_count: int,
+) -> list[dict]:
+    if not latest_episode:
+        return [
+            {
+                "label": "고급: 회차 생성 열기",
+                "description": "새 초안을 만들고 최근 회차 아티팩트를 생성합니다.",
+            },
+            {
+                "label": "작품 설정 열기",
+                "description": "STORY_BIBLE과 STATE가 비어 있지 않은지 먼저 확인합니다.",
+            },
+        ]
+
+    if quality_status == "hard_fail":
+        return [
+            {
+                "label": "고급: 원고 검수 열기",
+                "description": "차단 사유를 보고 수정본을 다시 저장합니다.",
+            },
+            {
+                "label": "고급: 회차 생성 열기",
+                "description": "필요하면 초안을 다시 생성하거나 수동으로 보정합니다.",
+            },
+        ]
+
+    if quality_status == "publishable" and package_count == 0:
+        return [
+            {
+                "label": "발행 운영 열기",
+                "description": "업로드 큐를 추가하고 발행 패키지를 준비합니다.",
+            },
+            {
+                "label": "자동화/진단 확인",
+                "description": "자동 발행 스케줄과 최근 진단 상태를 함께 점검합니다.",
+            },
+        ]
+
+    if package_count > 0 and pending_job_count > 0:
+        return [
+            {
+                "label": "발행 운영 열기",
+                "description": "대기 중인 업로드 작업과 플랫폼 상태를 확인합니다.",
+            },
+            {
+                "label": "자동화/진단 확인",
+                "description": "scheduled, cooldown, blocked 상태가 없는지 점검합니다.",
+            },
+        ]
+
+    return [
+        {
+            "label": "회차 워크플로 유지",
+            "description": "현재 흐름은 안정적입니다. 다음 회차 계획을 준비하세요.",
+        },
+        {
+            "label": "고급: 반자동 실행 열기",
+            "description": "필요하면 반자동 파이프라인으로 빠르게 다음 회차를 준비합니다.",
+        },
+    ]
 
 
 def _dedupe_preserving_order(values: list[str]) -> list[str]:

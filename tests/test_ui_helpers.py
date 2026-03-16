@@ -24,6 +24,7 @@ if "streamlit" not in sys.modules:
 if "dotenv" not in sys.modules:
     dotenv_stub = types.ModuleType("dotenv")
     dotenv_stub.load_dotenv = lambda *args, **kwargs: None
+    dotenv_stub.dotenv_values = lambda *args, **kwargs: {}
     sys.modules["dotenv"] = dotenv_stub
 
 from core.token_budget import get_field_stats
@@ -377,10 +378,10 @@ class TestUiHelpers(unittest.TestCase):
             (
                 "운영 개요",
                 "회차 워크플로",
-                "[1] 프로젝트 통합 설정",
-                "[2] 회차 생성",
-                "[3] 원고 검수",
-                "[4] 반자동 연재 모드",
+                "작품 설정",
+                "고급: 회차 생성",
+                "고급: 원고 검수",
+                "고급: 반자동 실행",
                 "자동화/진단",
                 "발행 운영",
             ),

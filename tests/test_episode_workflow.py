@@ -27,6 +27,12 @@ if "streamlit" not in sys.modules:
     streamlit_stub.code = lambda *args, **kwargs: None
     sys.modules["streamlit"] = streamlit_stub
 
+if "dotenv" not in sys.modules:
+    dotenv_stub = types.ModuleType("dotenv")
+    dotenv_stub.load_dotenv = lambda *args, **kwargs: None
+    dotenv_stub.dotenv_values = lambda *args, **kwargs: {}
+    sys.modules["dotenv"] = dotenv_stub
+
 
 from ui.episode_workflow import build_episode_workflow_snapshot
 
@@ -117,6 +123,7 @@ class TestEpisodeWorkflow(unittest.TestCase):
         self.assertEqual(snapshot["steps"][2]["state"], "차단")
         self.assertEqual(snapshot["steps"][3]["state"], "대기")
         self.assertEqual(snapshot["next_actions"][0], "원고 검수 또는 회차 생성에서 품질 차단 사유를 먼저 해결하세요.")
+        self.assertEqual(snapshot["shortcut_actions"][0]["label"], "고급: 원고 검수 열기")
 
     def test_snapshot_surfaces_draft_preview_path_and_queue_linkage_for_latest_episode(self):
         snapshot = build_episode_workflow_snapshot(
@@ -161,6 +168,20 @@ class TestEpisodeWorkflow(unittest.TestCase):
         self.assertTrue(snapshot["regenerate_applied"])
         self.assertTrue(snapshot["queue_linked"])
         self.assertIn("노벨피아", snapshot["queue_link_summary"])
+        self.assertEqual(snapshot["shortcut_actions"][0]["label"], "발행 운영 열기")
+
+    def test_snapshot_recommends_generation_shortcut_when_no_latest_episode_exists(self):
+        snapshot = build_episode_workflow_snapshot(
+            manifest={"episodes": {}},
+            latest_episode_content="",
+            latest_episode_plan={},
+            latest_quality_report={},
+            latest_packager_report={},
+            publishing_queue=[],
+            publishing_history=[],
+        )
+
+        self.assertEqual(snapshot["shortcut_actions"][0]["label"], "고급: 회차 생성 열기")
 
 
 if __name__ == "__main__":
