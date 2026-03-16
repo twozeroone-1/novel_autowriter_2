@@ -1,5 +1,6 @@
 from copy import deepcopy
 
+from core.publishing_critic import evaluate_publish_critic
 from core.publishing_quality import evaluate_publish_source
 from core.publishing_repair import repair_publish_source
 from core.publishing_structure import evaluate_publish_structure
@@ -46,12 +47,19 @@ def _build_hard_fail_result(
     reason: str,
 ) -> dict:
     errors: list[str] = []
-    for stage in ("rules", "structure"):
-        report = gate_reports.get(stage) or {}
-        for item in report.get("errors", []):
-            text = str(item)
-            if text not in errors:
-                errors.append(text)
+    for report_bundle in gate_reports.values():
+        if not isinstance(report_bundle, dict):
+            continue
+        for stage in ("rules", "structure", "critic"):
+            report = report_bundle.get(stage) or {}
+            for item in report.get("errors", []) if isinstance(report, dict) else []:
+                text = str(item)
+                if text not in errors:
+                    errors.append(text)
+            for item in report.get("issues", []) if isinstance(report, dict) else []:
+                text = str(item)
+                if text not in errors:
+                    errors.append(text)
     if reason and reason not in errors:
         errors.append(reason)
     return {
@@ -91,7 +99,25 @@ def _evaluate_reports(source_payload: dict) -> dict:
     }
 
 
-def evaluate_quality_gate(source_payload: dict, *, repair_enabled: bool = True) -> dict:
+def _with_critic_report(*, gate_reports: dict, critic_report: dict, repaired: bool) -> dict:
+    bundled = deepcopy(gate_reports)
+    if repaired:
+        bundled.setdefault("final", {})
+        bundled["final"]["critic"] = critic_report
+        return bundled
+
+    initial_reports = deepcopy(gate_reports.get("initial", {}))
+    initial_reports["critic"] = critic_report
+    bundled["final"] = initial_reports
+    return bundled
+
+
+def evaluate_quality_gate(
+    source_payload: dict,
+    *,
+    episode_plan: dict | None = None,
+    repair_enabled: bool = True,
+) -> dict:
     initial_source = deepcopy(source_payload)
     gate_reports = _evaluate_reports(initial_source)
     rules_report = gate_reports["rules"]
@@ -106,10 +132,23 @@ def evaluate_quality_gate(source_payload: dict, *, repair_enabled: bool = True) 
         )
 
     if _passes_gate(rules_report) and _passes_gate(structure_report):
-        return _build_publishable_result(
-            final_source=initial_source,
+        critic_report = evaluate_publish_critic(initial_source, episode_plan=episode_plan)
+        critic_gate_reports = _with_critic_report(
             gate_reports={"initial": gate_reports},
+            critic_report=critic_report,
+            repaired=False,
+        )
+        if critic_report.get("status") == "passed":
+            return _build_publishable_result(
+                final_source=initial_source,
+                gate_reports=critic_gate_reports,
+                attempted_repair=False,
+            )
+        return _build_hard_fail_result(
+            final_source=initial_source,
+            gate_reports=critic_gate_reports,
             attempted_repair=False,
+            reason=str(critic_report.get("summary", "")).strip() or "critic blocked publish",
         )
 
     if not repair_enabled or not _needs_repair(rules_report=rules_report, structure_report=structure_report):
@@ -124,10 +163,23 @@ def evaluate_quality_gate(source_payload: dict, *, repair_enabled: bool = True) 
     final_source = _merge_repaired_source(initial_source, repaired_patch)
     repaired_reports = _evaluate_reports(final_source)
     if _passes_gate(repaired_reports["rules"]) and _passes_gate(repaired_reports["structure"]):
-        return _build_publishable_result(
-            final_source=final_source,
+        critic_report = evaluate_publish_critic(final_source, episode_plan=episode_plan)
+        critic_gate_reports = _with_critic_report(
             gate_reports={"initial": gate_reports, "final": repaired_reports},
+            critic_report=critic_report,
+            repaired=True,
+        )
+        if critic_report.get("status") == "passed":
+            return _build_publishable_result(
+                final_source=final_source,
+                gate_reports=critic_gate_reports,
+                attempted_repair=True,
+            )
+        return _build_hard_fail_result(
+            final_source=final_source,
+            gate_reports=critic_gate_reports,
             attempted_repair=True,
+            reason=str(critic_report.get("summary", "")).strip() or "critic blocked publish",
         )
 
     return _build_hard_fail_result(

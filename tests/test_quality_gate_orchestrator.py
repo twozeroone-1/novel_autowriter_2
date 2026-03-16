@@ -15,7 +15,36 @@ def _valid_source(*, title: str = "12화. 계약의 대가", content: str | None
 
 
 class TestQualityGateOrchestrator(unittest.TestCase):
-    def test_evaluate_quality_gate_returns_publishable_when_rules_and_structure_pass(self):
+    @patch("core.quality_gate_orchestrator.evaluate_publish_critic")
+    def test_evaluate_quality_gate_calls_critic_only_after_cheap_gates_pass(self, evaluate_publish_critic):
+        evaluate_publish_critic.return_value = {
+            "status": "passed",
+            "summary": "ok",
+            "issues": [],
+            "model": "gemini-2.5-flash",
+            "cost": {"mode": "single_pass"},
+            "raw_excerpt": "",
+        }
+
+        result = evaluate_quality_gate(
+            _valid_source(),
+            episode_plan={"episode_objective": "계약의 대가를 수습한다"},
+        )
+
+        self.assertEqual(result["status"], "publishable")
+        evaluate_publish_critic.assert_called_once()
+
+    @patch("core.quality_gate_orchestrator.evaluate_publish_critic")
+    def test_evaluate_quality_gate_returns_publishable_when_rules_and_structure_pass(self, evaluate_publish_critic):
+        evaluate_publish_critic.return_value = {
+            "status": "passed",
+            "summary": "ok",
+            "issues": [],
+            "model": "gemini-2.5-flash",
+            "cost": {"mode": "single_pass"},
+            "raw_excerpt": "",
+        }
+
         result = evaluate_quality_gate(_valid_source())
 
         self.assertEqual(result["status"], "publishable")
@@ -23,7 +52,20 @@ class TestQualityGateOrchestrator(unittest.TestCase):
         self.assertEqual(result["final_source"]["title"], "12화. 계약의 대가")
 
     @patch("core.quality_gate_orchestrator.repair_publish_source")
-    def test_evaluate_quality_gate_repairs_retry_possible_source_once(self, repair_publish_source):
+    @patch("core.quality_gate_orchestrator.evaluate_publish_critic")
+    def test_evaluate_quality_gate_repairs_retry_possible_source_once(
+        self,
+        evaluate_publish_critic,
+        repair_publish_source,
+    ):
+        evaluate_publish_critic.return_value = {
+            "status": "passed",
+            "summary": "ok",
+            "issues": [],
+            "model": "gemini-2.5-flash",
+            "cost": {"mode": "single_pass"},
+            "raw_excerpt": "",
+        }
         repair_publish_source.return_value = {
             "title": "12화. 계약의 대가",
             "content": "# 12화. 계약의 대가\n\n"
@@ -68,6 +110,52 @@ class TestQualityGateOrchestrator(unittest.TestCase):
         self.assertEqual(result["status"], "hard_fail")
         self.assertFalse(result["attempted_repair"])
         repair_publish_source.assert_not_called()
+
+    @patch("core.quality_gate_orchestrator.evaluate_publish_critic")
+    def test_evaluate_quality_gate_hard_fails_when_critic_blocks(self, evaluate_publish_critic):
+        evaluate_publish_critic.return_value = {
+            "status": "blocked",
+            "summary": "objective drift",
+            "issues": ["episode objective missing"],
+            "model": "gemini-2.5-flash",
+            "cost": {"mode": "single_pass"},
+            "raw_excerpt": "",
+        }
+
+        result = evaluate_quality_gate(
+            _valid_source(),
+            episode_plan={"episode_objective": "계약의 대가를 수습한다"},
+        )
+
+        self.assertEqual(result["status"], "hard_fail")
+        self.assertIn("episode objective missing", result["errors"])
+        self.assertEqual(result["gate_reports"]["final"]["critic"]["status"], "blocked")
+
+    @patch("core.quality_gate_orchestrator.evaluate_publish_critic")
+    def test_evaluate_quality_gate_hard_fails_when_critic_is_unavailable(self, evaluate_publish_critic):
+        evaluate_publish_critic.return_value = {
+            "status": "critic_unavailable",
+            "summary": "backend unavailable",
+            "issues": [],
+            "model": "gemini-2.5-flash",
+            "cost": {"mode": "single_pass"},
+            "raw_excerpt": "",
+        }
+
+        result = evaluate_quality_gate(_valid_source())
+
+        self.assertEqual(result["status"], "hard_fail")
+        self.assertIn("backend unavailable", result["errors"])
+        self.assertEqual(result["gate_reports"]["final"]["critic"]["status"], "critic_unavailable")
+
+    @patch("core.quality_gate_orchestrator.evaluate_publish_critic")
+    def test_evaluate_quality_gate_does_not_call_critic_on_initial_hard_fail(self, evaluate_publish_critic):
+        result = evaluate_quality_gate(
+            _valid_source(content="# 99화. 완전히 다른 번호\n\n짧음")
+        )
+
+        self.assertEqual(result["status"], "hard_fail")
+        evaluate_publish_critic.assert_not_called()
 
 
 if __name__ == "__main__":
