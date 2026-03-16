@@ -182,6 +182,8 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(workspace_settings["state"], "old state")
                 self.assertEqual(workspace_settings["summary_of_previous"], "new summary")
 
+    # Primary Story Bible path
+
     def test_get_story_bible_settings_read_story_bible_fields_from_structured_store(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
@@ -204,7 +206,9 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(settings["tone_and_manner"], "structured style")
                 self.assertEqual(settings["continuity"], "structured rules")
 
-    def test_default_config_alias_points_to_story_bible_defaults(self):
+    # Compatibility alias path
+
+    def test_default_config_compatibility_alias_points_to_story_bible_defaults(self):
         self.assertIs(context_module.DEFAULT_CONFIG, context_module.DEFAULT_STORY_BIBLE_SETTINGS)
 
     def test_get_story_bible_settings_docstring_marks_primary_api(self):
@@ -239,7 +243,7 @@ class TestContextManager(unittest.TestCase):
                     },
                 )
 
-    def test_get_config_alias_matches_story_bible_settings(self):
+    def test_get_config_compatibility_alias_matches_story_bible_settings(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
                 story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
@@ -425,7 +429,9 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(workspace_settings["state"], "legacy state")
                 self.assertEqual(workspace_settings["summary_of_previous"], "legacy summary")
 
-    def test_save_config_updates_story_bible_store_fields(self):
+    # Compatibility alias write path
+
+    def test_save_config_compatibility_alias_updates_story_bible_store_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
                 story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
@@ -683,7 +689,7 @@ class TestContextManager(unittest.TestCase):
 
                 self.assertEqual(plot_outline, "legacy plot")
 
-    def test_save_config_ignores_plot_fields_and_keeps_existing_plot_store_value(self):
+    def test_save_config_compatibility_alias_ignores_plot_fields_and_keeps_existing_plot_store_value(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
                 plot_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
@@ -711,7 +717,7 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(plot_payload["plot_outline"], "stored plot")
                 self.assertEqual(plot_payload["plot_version"], "1")
 
-    def test_save_config_routes_story_bible_shadow_write_through_shared_helper(self):
+    def test_save_config_compatibility_alias_routes_story_bible_shadow_write_through_shared_helper(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
                 story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
@@ -742,7 +748,7 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(story_bible["style_guide"], "new style")
                 self.assertEqual(story_bible["fixed_rules"], "new rules")
 
-    def test_save_config_delegates_to_save_story_bible_sections(self):
+    def test_save_config_compatibility_alias_delegates_to_save_story_bible_sections(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)):
                 manager = ContextManager(project_name="sample")
@@ -767,7 +773,7 @@ class TestContextManager(unittest.TestCase):
                     continuity="new rules",
                 )
 
-    def test_save_config_ignores_state_fields_and_preserves_existing_context_state_store_value(self):
+    def test_save_config_compatibility_alias_ignores_state_fields_and_preserves_existing_context_state_store_value(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
                 story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
@@ -802,7 +808,7 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(legacy_config["state"], "stored state")
                 self.assertEqual(legacy_config["summary_of_previous"], "stored summary")
 
-    def test_save_config_does_not_create_context_state_store_from_state_fields(self):
+    def test_save_config_compatibility_alias_does_not_create_context_state_store_from_state_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
                 story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
