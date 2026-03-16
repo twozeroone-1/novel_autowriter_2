@@ -36,6 +36,77 @@ class FakeClient:
 
 
 class TestPublishingExecutor(unittest.TestCase):
+    def test_publish_job_uses_publish_packager_output_for_upload_payload(self):
+        from core.publishing_executor import PublishingExecutor
+
+        fake_client = FakeClient()
+        packager_report = {
+            "source": {"title": "12화. 계약의 대가", "episode_id": "", "artifact_status": "legacy"},
+            "packages": {
+                "munpia": {
+                    "work_id": "work-1",
+                    "work_metadata": {
+                        "title": "Project title",
+                        "description": "desc",
+                        "genre": "fantasy",
+                        "age_grade": "general",
+                        "cover_path": "",
+                    },
+                    "upload_request": {
+                        "episode_title": "Packaged Episode 12",
+                        "content": "# 12화. 계약의 대가\n\n패키저 본문",
+                        "publish_mode": "immediate",
+                        "visibility": "public",
+                        "reserved_at": None,
+                    },
+                    "expected_publication": {
+                        "episode_title": "Packaged Episode 12",
+                        "publish_mode": "immediate",
+                        "visibility": "public",
+                        "reserved_at": None,
+                    },
+                }
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            chapter_path = projects_dir / "sample" / "chapters" / "12화.md"
+            chapter_path.parent.mkdir(parents=True, exist_ok=True)
+            chapter_path.write_text("# 12화. 계약의 대가\n\n본문", encoding="utf-8")
+
+            with patch("core.chapter_source.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.publishing_executor.build_publish_packages",
+                return_value=packager_report,
+            ) as build_publish_packages:
+                executor = PublishingExecutor(
+                    project_name="sample",
+                    credential_loader=lambda project_name, platform_name: {"username": "id", "password": "pw"},
+                    client_factory=lambda **kwargs: fake_client,
+                )
+                result = executor.publish_job(
+                    job={
+                        "chapter_title": "Episode 12",
+                        "source_path": "chapters/12화.md",
+                        "targets": {
+                            "munpia": {
+                                "selected": True,
+                                "work_id": "work-1",
+                            }
+                        },
+                    },
+                    config={
+                        "browser": {"headless": True},
+                        "platforms": {
+                            "munpia": {"enabled": True, "work_id": ""},
+                        },
+                    },
+                )
+
+        build_publish_packages.assert_called_once()
+        self.assertIn(("upload_episode", "work-1", "Packaged Episode 12", "# 12화. 계약의 대가\n\n패키저 본문"), fake_client.calls)
+        self.assertEqual(result["packager_report"], packager_report)
+
     def test_publish_job_uses_existing_work_id_and_uploads_selected_platform(self):
         from core.publishing_executor import PublishingExecutor
 

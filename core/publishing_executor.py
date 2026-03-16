@@ -1,6 +1,7 @@
 from copy import deepcopy
 
 from core.chapter_source import load_chapter_source
+from core.publish_packager import build_publish_packages
 from core.platform_clients.base import EpisodeUploadRequest, PlatformError, PlatformWorkMetadata
 from core.platform_clients.munpia import MunpiaClient
 from core.platform_clients.novelpia import NovelpiaClient
@@ -26,13 +27,16 @@ class PublishingExecutor:
             episode_id=str(job.get("episode_id", "")).strip() or None,
         )
         source_payload = _apply_source_override(source_payload=source_payload, source_override=job.get("source_override"))
+        packager_report = build_publish_packages(
+            project_name=self.project_name,
+            source_payload=source_payload,
+            job=job,
+            config=config,
+        )
         platform_results: dict[str, dict] = {}
         platform_config_updates: dict[str, dict] = {}
 
-        for platform_name, target in deepcopy(job.get("targets", {})).items():
-            if not isinstance(target, dict) or not target.get("selected"):
-                continue
-
+        for platform_name, package in deepcopy(packager_report.get("packages", {})).items():
             platform_config = deepcopy(config.get("platforms", {}).get(platform_name, {}))
             if not platform_config.get("enabled", False):
                 platform_results[platform_name] = {
@@ -62,27 +66,29 @@ class PublishingExecutor:
             )
             try:
                 client.login()
-                work_id = str(target.get("work_id", "")).strip() or str(platform_config.get("work_id", "")).strip()
+                work_id = str(package.get("work_id", "")).strip() or str(platform_config.get("work_id", "")).strip()
                 if not work_id:
+                    metadata_payload = package.get("work_metadata", {})
                     metadata = PlatformWorkMetadata(
-                        title=str(platform_config.get("work_title", self.project_name)),
-                        description=str(platform_config.get("work_description", "")),
-                        genre=str(platform_config.get("genre", "")),
-                        age_grade=str(platform_config.get("default_age_grade", "general")),
-                        cover_path=str(platform_config.get("cover_path", "")),
+                        title=str(metadata_payload.get("title", self.project_name)),
+                        description=str(metadata_payload.get("description", "")),
+                        genre=str(metadata_payload.get("genre", "")),
+                        age_grade=str(metadata_payload.get("age_grade", "general")),
+                        cover_path=str(metadata_payload.get("cover_path", "")),
                     )
                     work_result = client.ensure_work(metadata, work_id="")
                     work_id = work_result.work_id
                     if work_id:
                         platform_config_updates[platform_name] = {"work_id": work_id}
+                request_payload = package.get("upload_request", {})
                 upload_result = client.upload_episode(
                     EpisodeUploadRequest(
                         work_id=work_id,
-                        episode_title=str(target.get("episode_title") or job.get("chapter_title") or source_payload["title"]),
-                        content=str(source_payload["content"]),
-                        publish_mode=str(target.get("publish_mode", "immediate")),
-                        visibility=str(target.get("visibility", "public")),
-                        reserved_at=target.get("reserved_at"),
+                        episode_title=str(request_payload.get("episode_title", "")),
+                        content=str(request_payload.get("content", "")),
+                        publish_mode=str(request_payload.get("publish_mode", "immediate")),
+                        visibility=str(request_payload.get("visibility", "public")),
+                        reserved_at=request_payload.get("reserved_at"),
                     )
                 )
                 platform_results[platform_name] = {
@@ -92,6 +98,7 @@ class PublishingExecutor:
                     "episode_id": upload_result.episode_id,
                     "error_type": upload_result.error_type,
                     "error_text": upload_result.error_text,
+                    "expected_publication": deepcopy(package.get("expected_publication", {})),
                 }
             except PlatformError as exc:
                 platform_results[platform_name] = {
@@ -106,6 +113,7 @@ class PublishingExecutor:
 
         return {
             "source": source_payload,
+            "packager_report": packager_report,
             "platform_results": platform_results,
             "platform_config_updates": platform_config_updates,
         }
