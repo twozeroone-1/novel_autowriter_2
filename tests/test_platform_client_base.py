@@ -45,6 +45,22 @@ class TestPlatformClientBase(unittest.TestCase):
         self.assertIsNotNone(method)
         self.assertTrue(getattr(method, "__isabstractmethod__", False))
 
+    def test_supported_publish_modes_reads_munpia_client_capability(self):
+        base_module = importlib.import_module("core.platform_clients.base")
+        munpia_module = importlib.import_module("core.platform_clients.munpia")
+
+        modes = base_module.supported_publish_modes(munpia_module.MunpiaClient)
+
+        self.assertEqual(modes, ("immediate",))
+
+    def test_supported_publish_modes_reads_novelpia_client_capability(self):
+        base_module = importlib.import_module("core.platform_clients.base")
+        novelpia_module = importlib.import_module("core.platform_clients.novelpia")
+
+        modes = base_module.supported_publish_modes(novelpia_module.NovelpiaClient)
+
+        self.assertEqual(modes, ("immediate", "reserved"))
+
 
 if __name__ == "__main__":
     unittest.main()

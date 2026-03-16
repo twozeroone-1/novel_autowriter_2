@@ -497,6 +497,11 @@ class TestNovelpiaClient(unittest.TestCase):
 
         self.assertEqual(context.exception.error_type, "requires_user_action")
 
+    def test_supported_publish_modes_include_reserved(self):
+        from core.platform_clients.novelpia import NovelpiaClient
+
+        self.assertEqual(NovelpiaClient.supported_publish_modes(), ("immediate", "reserved"))
+
     def test_upload_episode_uses_pending_publish_options_for_private_visibility(self):
         from core.platform_clients.novelpia import NovelpiaClient
 

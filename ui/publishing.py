@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import streamlit as st
 
-from core.platform_clients.base import PlatformError, PlatformWorkMetadata
+from core.platform_clients.base import PlatformError, PlatformWorkMetadata, supports_publish_mode
 from core.platform_clients.munpia import MunpiaClient
 from core.platform_clients.novelpia import NovelpiaClient
 from core.publishing_executor import PublishingExecutor
@@ -21,6 +21,10 @@ PLATFORM_LABELS = {
     "novelpia": "노벨피아",
 }
 PLATFORM_OPTIONS = tuple(PLATFORM_LABELS.keys())
+PLATFORM_CLIENTS = {
+    "munpia": MunpiaClient,
+    "novelpia": NovelpiaClient,
+}
 WEEKDAY_LABELS = {
     "mon": "월",
     "tue": "화",
@@ -106,6 +110,17 @@ def summarize_selected_platforms(targets: dict) -> str:
         if platform_name in PLATFORM_LABELS and payload.get("selected")
     ]
     return ", ".join(labels) if labels else "-"
+
+
+def get_unsupported_publish_mode_platforms(*, selected_platforms: list[str], publish_mode: str) -> list[str]:
+    unsupported: list[str] = []
+    for platform_name in selected_platforms:
+        client_class = PLATFORM_CLIENTS.get(platform_name)
+        if client_class is None:
+            continue
+        if not supports_publish_mode(client_class, publish_mode):
+            unsupported.append(platform_name)
+    return unsupported
 
 
 def count_pending_publishing_jobs(queue: list[dict]) -> int:
@@ -514,6 +529,12 @@ def _render_queue_editor(app, store: PublishingStore, config: dict, queue: list[
             st.warning("업로드 회차 제목을 입력해 주세요.")
         elif not selected_platforms:
             st.warning("대상 플랫폼을 하나 이상 선택해 주세요.")
+        elif unsupported_platforms := get_unsupported_publish_mode_platforms(
+            selected_platforms=selected_platforms,
+            publish_mode=publish_mode,
+        ):
+            unsupported_labels = ", ".join(PLATFORM_LABELS.get(name, name) for name in unsupported_platforms)
+            st.warning(f"선택한 발행 방식은 다음 플랫폼에서 지원되지 않습니다: {unsupported_labels}")
         else:
             scheduled_at = _combine_date_time(scheduled_date, scheduled_time).isoformat()
             reserved_at = (

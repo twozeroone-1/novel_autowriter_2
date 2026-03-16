@@ -12,6 +12,7 @@ from core.platform_clients.playwright_session import PlaywrightBrowserSession
 
 class MunpiaClient(BasePlatformClient):
     LOGIN_URL = "https://nssl.munpia.com/login"
+    SUPPORTED_PUBLISH_MODES = ("immediate",)
     DEFAULT_SELECTORS = {
         "login_username": "#username",
         "login_password": "#password",

@@ -15,6 +15,7 @@ from core.platform_clients.playwright_session import PlaywrightBrowserSession
 class NovelpiaClient(BasePlatformClient):
     LOGIN_URL = "https://novelpia.com/mybook/mynovel"
     WRITER_ROOM_URL = "https://novelpia.com/writer_room"
+    SUPPORTED_PUBLISH_MODES = ("immediate", "reserved")
     DEFAULT_SELECTORS = {
         "login_username": "input[name='email']",
         "login_password": "input[name='wd']",

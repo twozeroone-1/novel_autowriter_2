@@ -231,6 +231,26 @@ class TestPublishingUi(unittest.TestCase):
 
         self.assertEqual(rows[0]["결과"], "예약")
 
+    def test_get_unsupported_publish_mode_platforms_flags_munpia_for_reserved(self):
+        module = self._load_module()
+
+        unsupported = module.get_unsupported_publish_mode_platforms(
+            selected_platforms=["munpia", "novelpia"],
+            publish_mode="reserved",
+        )
+
+        self.assertEqual(unsupported, ["munpia"])
+
+    def test_get_unsupported_publish_mode_platforms_allows_mixed_immediate_mode(self):
+        module = self._load_module()
+
+        unsupported = module.get_unsupported_publish_mode_platforms(
+            selected_platforms=["munpia", "novelpia"],
+            publish_mode="immediate",
+        )
+
+        self.assertEqual(unsupported, [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -283,6 +283,11 @@ class TestMunpiaClient(unittest.TestCase):
 
         self.assertEqual(context.exception.error_type, "requires_user_action")
 
+    def test_supported_publish_modes_only_include_immediate(self):
+        from core.platform_clients.munpia import MunpiaClient
+
+        self.assertEqual(MunpiaClient.supported_publish_modes(), ("immediate",))
+
     def test_verify_publication_succeeds_for_completed_episode_url(self):
         from core.platform_clients.munpia import MunpiaClient
 
