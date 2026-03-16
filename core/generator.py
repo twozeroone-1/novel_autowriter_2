@@ -3,10 +3,11 @@ import re
 from datetime import datetime
 from pathlib import Path
 from core.canon_extractor import extract_canon_update
-from core.episode_planner import EpisodePlanner
+from core.episode_planner import DEFAULT_EPISODE_PLAN, EpisodePlanner
 from core.episode_artifact_store import EpisodeArtifactStore
 from core.file_utils import atomic_write_text
 from core.llm import _extract_first_json_value, generate_text
+from core.run_snapshot_store import RunSnapshotStore
 from core.context import ContextManager
 
 class Generator:
@@ -15,9 +16,17 @@ class Generator:
         self.ctx = ContextManager(project_name=project_name)
         self.episode_planner = EpisodePlanner(project_name=project_name)
         self.artifact_store = EpisodeArtifactStore(project_name=project_name)
+        self.snapshot_store = RunSnapshotStore(project_name=project_name)
         # ContextManager가 생성한 동적 경로를 참조
         self.chapters_dir = self.ctx.data_dir / "chapters"
         self.chapters_dir.mkdir(parents=True, exist_ok=True)
+
+    def _build_fallback_episode_plan(self, *, length_goal: int, planner_error: str | None = None) -> dict:
+        plan = dict(DEFAULT_EPISODE_PLAN)
+        plan["target_length"] = int(length_goal)
+        if planner_error:
+            plan["planner_error"] = planner_error
+        return plan
         
     def create_chapter(
         self,
@@ -27,12 +36,20 @@ class Generator:
         plot_strength: str = "balanced",
     ) -> str:
         """컨텍스트를 모아 LLM에 전달하고 생성된 원고 텍스트를 반환합니다."""
-        episode_plan = self.episode_planner.build_episode_plan(
-            instruction,
-            length_goal=length_goal,
-            include_plot=include_plot,
-            plot_strength=plot_strength,
-        )
+        run_id = self.snapshot_store.create_run_id(prefix="chapter")
+        try:
+            episode_plan = self.episode_planner.build_episode_plan(
+                instruction,
+                length_goal=length_goal,
+                include_plot=include_plot,
+                plot_strength=plot_strength,
+            )
+        except Exception as exc:
+            episode_plan = self._build_fallback_episode_plan(
+                length_goal=length_goal,
+                planner_error=str(exc),
+            )
+        self.snapshot_store.write_json_snapshot(run_id, "episode_plan.json", episode_plan)
         prompt = self.ctx.build_generation_prompt(
             instruction,
             length_goal,

@@ -1,9 +1,11 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 import core.context as context_module
+import core.run_snapshot_store as run_snapshot_store_module
 from core.generator import Generator
 
 
@@ -84,6 +86,60 @@ class TestGeneratorPlanning(unittest.TestCase):
                     include_plot=True,
                     plot_strength="strict",
                 )
+
+    def test_create_chapter_writes_episode_plan_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            with patch.object(context_module, "BASE_DATA_DIR", base):
+                with patch.object(run_snapshot_store_module, "DATA_PROJECTS_DIR", base):
+                    generator = Generator(project_name="sample")
+                    with patch.object(
+                        generator.episode_planner,
+                        "build_episode_plan",
+                        return_value={
+                            "episode_objective": "추적을 끊고 은신처 확보",
+                            "must_include_characters": ["lead"],
+                            "hooks_to_payoff": ["계약의 반동"],
+                            "hooks_to_advance": ["계약서 비밀"],
+                            "forbidden_moves": ["새 설정 추가 금지"],
+                            "target_length": 5200,
+                            "tone_notes": "긴장 유지",
+                            "continuity_focus": ["도주 직후 상태 유지"],
+                            "plan_version": "v1",
+                        },
+                    ), patch("core.generator.generate_text", return_value="chapter body"):
+                        result = generator.create_chapter("다음 화를 써줘", length_goal=5200)
+
+                    self.assertEqual(result, "chapter body")
+                    run_dirs = list((base / "sample" / "runs").iterdir())
+                    self.assertEqual(len(run_dirs), 1)
+                    snapshot = json.loads((run_dirs[0] / "episode_plan.json").read_text(encoding="utf-8"))
+                    self.assertEqual(snapshot["episode_objective"], "추적을 끊고 은신처 확보")
+                    self.assertEqual(snapshot["target_length"], 5200)
+
+    def test_create_chapter_writes_empty_plan_snapshot_when_planner_fails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            with patch.object(context_module, "BASE_DATA_DIR", base):
+                with patch.object(run_snapshot_store_module, "DATA_PROJECTS_DIR", base):
+                    generator = Generator(project_name="sample")
+                    with patch.object(
+                        generator.episode_planner,
+                        "build_episode_plan",
+                        side_effect=RuntimeError("planner exploded"),
+                    ), patch("core.generator.generate_text", return_value="chapter body") as mocked_generate:
+                        result = generator.create_chapter("다음 화를 써줘", length_goal=5100)
+
+                    self.assertEqual(result, "chapter body")
+                    prompt = mocked_generate.call_args.args[0]
+                    self.assertNotIn("[EPISODE PLAN]", prompt)
+                    run_dirs = list((base / "sample" / "runs").iterdir())
+                    self.assertEqual(len(run_dirs), 1)
+                    snapshot = json.loads((run_dirs[0] / "episode_plan.json").read_text(encoding="utf-8"))
+                    self.assertEqual(snapshot["episode_objective"], "")
+                    self.assertEqual(snapshot["target_length"], 5100)
+                    self.assertEqual(snapshot["plan_version"], "v1")
+                    self.assertIn("planner exploded", snapshot["planner_error"])
 
 
 if __name__ == "__main__":
