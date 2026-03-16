@@ -3,6 +3,17 @@ from pathlib import Path
 
 from core.app_paths import DATA_PROJECTS_DIR
 from core.canon_store import CanonStore
+from core.context_characters import normalize_characters
+from core.context_prompt_sections import (
+    build_canon_context,
+    build_character_context,
+    build_continuity_context,
+    build_generation_prompt as build_prompt_text,
+    build_plot_block as build_plot_text,
+    build_release_policy_context,
+    build_state_context,
+    build_worldview_context,
+)
 from core.context_state_shadow import load_state_shadow_snapshot, write_legacy_state_shadow
 from core.context_state_store import DEFAULT_CONTEXT_STATE, ContextStateStore
 from core.context_story_bible_shadow import (
@@ -176,95 +187,32 @@ class ContextManager:
             return self.context_state_store.load()
         return load_state_shadow_snapshot(self.config_path)
 
-    def _normalize_character(self, raw_char: object) -> dict | None:
-        if not isinstance(raw_char, dict):
-            return None
-
-        required_string_fields = ("id", "name", "role", "description")
-        normalized: dict[str, object] = {}
-        for field in required_string_fields:
-            value = raw_char.get(field)
-            if value is None:
-                return None
-            text = value if isinstance(value, str) else str(value)
-            if not text.strip():
-                return None
-            normalized[field] = text
-
-        traits = raw_char.get("traits")
-        if not isinstance(traits, list):
-            return None
-        normalized_traits: list[str] = []
-        for item in traits:
-            text = item if isinstance(item, str) else str(item)
-            if text.strip():
-                normalized_traits.append(text)
-        normalized["traits"] = normalized_traits
-        return normalized
-
-    def _normalize_characters(self, chars: list | dict) -> list[dict]:
-        if not isinstance(chars, list):
-            return []
-
-        normalized: list[dict] = []
-        for index, raw_char in enumerate(chars):
-            normalized_char = self._normalize_character(raw_char)
-            if normalized_char is None:
-                print(f"[ContextManager] Skipping invalid character at index {index}")
-                continue
-            normalized.append(normalized_char)
-        return normalized
-
     def get_worldview_context(self) -> str:
         prompt_fields = self._get_story_bible_prompt_fields()
         worldview = prompt_fields.get("worldview", "")
         tone = prompt_fields.get("tone_and_manner", "")
-        return f"""[STORY BIBLE] (세계관 및 기본 설정)
-{worldview}
-
-[STYLE GUIDE] (문체 및 작성 지침)
-{tone}
-"""
+        return build_worldview_context(worldview, tone)
 
     def get_continuity_context(self) -> str:
         continuity = self._get_story_bible_prompt_fields().get("continuity", "")
-        return f"""[CONTINUITY] (고정 설정, 절대 바뀌면 안 되는 규칙)
-{continuity}
-"""
+        return build_continuity_context(continuity)
 
     def get_canon_context(self) -> str:
         canon_state = self.canon_store.load_current_state()
-        return f"""[CANON FACTS] (발행 완료 회차 기준 확정 사실)
-{json.dumps(canon_state, ensure_ascii=False, indent=2)}
-"""
+        return build_canon_context(canon_state)
 
     def get_release_policy_context(self) -> str:
         release_policy = self.release_policy_store.load()
-        return f"""[RELEASE POLICY] (플랫폼별 발행 정책)
-{json.dumps(release_policy, ensure_ascii=False, indent=2)}
-"""
+        return build_release_policy_context(release_policy)
 
     def get_state_context(self) -> str:
         state_snapshot = self._get_state_snapshot()
         state_info = state_snapshot.get("state", "")
         prev_summary = state_snapshot.get("summary_of_previous", "")
-        return f"""[STATE] (현재 회차 상태, 갈등, 감정선)
-{state_info}
-
-[PREVIOUS_SUMMARY] (이전 줄거리 요약)
-{prev_summary}
-"""
+        return build_state_context(state_info, prev_summary)
 
     def get_character_context(self) -> str:
-        chars_data = self.get_characters()
-        if not chars_data:
-            return "[등장인물 정보 없음]"
-
-        lines = ["[주요 등장인물 프로필]"]
-        for char in chars_data:
-            traits = ", ".join(char.get("traits", []))
-            lines.append(f"- {char['name']} ({char['role']}): {char['description']} (특징: {traits})")
-        return "\n".join(lines)
+        return build_character_context(self.get_characters())
 
     def get_story_bible_settings(self) -> dict:
         """primary Story Bible settings read API."""
@@ -288,7 +236,7 @@ class ContextManager:
         }
 
     def get_characters(self) -> list[dict]:
-        return self._normalize_characters(self._load_json(self.chars_path))
+        return normalize_characters(self._load_json(self.chars_path))
 
     def save_story_bible_sections(
         self,
@@ -324,7 +272,7 @@ class ContextManager:
         if not isinstance(chars_data, list):
             raise ValueError("등장인물 데이터는 JSON 배열(list)이어야 합니다.")
 
-        normalized_chars = self._normalize_characters(chars_data)
+        normalized_chars = normalize_characters(chars_data)
         if len(normalized_chars) != len(chars_data):
             raise ValueError("등장인물 데이터에 잘못된 항목이 있습니다. id/name/role/description/traits가 필요합니다.")
 
@@ -411,17 +359,11 @@ class ContextManager:
         include_plot: bool = False,
         plot_strength: str = "balanced",
     ) -> str:
-        plot_ctx = self.get_plot_outline()
-        if not include_plot or not plot_ctx:
-            return ""
-
-        return f"""
-[PLOT OUTLINE] (?κ린 ?뚮’ 媛?대뱶)
-{plot_ctx}
-
-[?뚮’ 諛섏쁺 媛뺣룄]
-{plot_strength}
-"""
+        return build_plot_text(
+            plot_outline=self.get_plot_outline(),
+            include_plot=include_plot,
+            plot_strength=plot_strength,
+        )
 
     def build_generation_prompt(
         self,
@@ -437,30 +379,14 @@ class ContextManager:
         release_policy_ctx = self.get_release_policy_context()
         state_ctx = self.get_state_context()
         plot_block = self.build_plot_block(include_plot=include_plot, plot_strength=plot_strength)
-        if False:
-            plot_block = f"""
-[PLOT OUTLINE] (장기 플롯 가이드)
-{plot_ctx}
-
-[플롯 반영 강도]
-{plot_strength}
-"""
-
-        return f"""당신은 프로 웹소설 작가입니다. 다음 설정과 등장인물 정보를 바탕으로 다음 회차 본문을 작성해 주세요.
-CONTINUITY를 깨지 말고, STATE의 갈등과 감정선을 자연스럽게 이어 주세요.
-
-{world_ctx}
-{continuity_ctx}
-{canon_ctx}
-{release_policy_ctx}
-{state_ctx}
-{char_ctx}
-{plot_block}
-
-[이번 회차 작성 지시사항]
-{user_instruction}
-
-[분량 및 서술 조건]
-- 목표 분량: 공백 포함 약 {length_goal}자
-- 제목은 생략하고 본문만 출력
-"""
+        return build_prompt_text(
+            worldview_context=world_ctx,
+            continuity_context=continuity_ctx,
+            canon_context=canon_ctx,
+            release_policy_context=release_policy_ctx,
+            state_context=state_ctx,
+            character_context=char_ctx,
+            plot_block=plot_block,
+            user_instruction=user_instruction,
+            length_goal=length_goal,
+        )
