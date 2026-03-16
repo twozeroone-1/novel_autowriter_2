@@ -79,6 +79,47 @@ class TestPublishingCanon(unittest.TestCase):
             self.assertEqual(report["status"], "skipped")
             self.assertEqual(store.load_current_state()["timeline"], [])
 
+    def test_finalize_publish_canon_appends_episode_id_to_candidate_timeline(self):
+        _, finalize_publish_canon = self._load_finalizer()
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch.object(canon_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)):
+            store = CanonStore(project_name="sample")
+            report = finalize_publish_canon(
+                project_name="sample",
+                episode_id="ep_021",
+                overall_status="done",
+                job={},
+                result={"canon_update": {"people": {"lead": {"mood": "focused"}}}},
+                source_payload={"content": "본문"},
+                canon_store=store,
+                now=datetime(2026, 3, 16, 21, 0),
+            )
+
+            self.assertEqual(report["status"], "applied")
+            self.assertEqual(store.load_current_state()["timeline"], ["ep_021"])
+
+    def test_finalize_publish_canon_returns_failed_report_when_extractor_raises(self):
+        module, finalize_publish_canon = self._load_finalizer()
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch.object(canon_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)):
+            store = CanonStore(project_name="sample")
+            with patch.object(module, "extract_canon_update", side_effect=RuntimeError("canon extract failed")):
+                report = finalize_publish_canon(
+                    project_name="sample",
+                    episode_id="ep_099",
+                    overall_status="done",
+                    job={},
+                    result={},
+                    source_payload={"content": "본문"},
+                    canon_store=store,
+                    now=datetime(2026, 3, 16, 21, 0),
+                )
+
+            self.assertEqual(report["status"], "failed")
+            self.assertEqual(report["source"], "extractor")
+            self.assertEqual(report["error"], "canon extract failed")
+            self.assertEqual(store.load_current_state()["timeline"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

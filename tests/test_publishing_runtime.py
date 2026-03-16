@@ -203,7 +203,7 @@ class TestPublishingRuntime(unittest.TestCase):
         self.assertEqual(queue[0]["status"], "partial_failed")
         self.assertEqual(queue[0]["targets"]["munpia"]["status"], "done")
         self.assertEqual(queue[0]["targets"]["novelpia"]["status"], "failed")
-        self.assertEqual(state["status"], "idle")
+        self.assertEqual(state["status"], "cooldown")
         self.assertFalse(history[0]["success"])
         self.assertEqual(history[0]["platform_results"]["novelpia"]["error_type"], "retryable")
 
@@ -360,6 +360,288 @@ class TestPublishingRuntime(unittest.TestCase):
         self.assertEqual(executors["enabled_project"].call_count, 1)
         self.assertNotIn("disabled_project", executors)
 
+    def test_tick_skips_when_policy_returns_skip(self):
+        module = importlib.import_module("core.publishing_runtime")
+        runtime_cls = getattr(module, "PublishingRuntime")
+        now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            with patch("core.publishing_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir
+            ), patch("core.canon_store.DATA_PROJECTS_DIR", projects_dir), patch.object(
+                module,
+                "select_runnable_job",
+                return_value={"action": "skip", "reason": "not_due", "job": None},
+            ) as select_runnable_job:
+                store = PublishingStore(project_name="sample")
+                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                executor = FakePublishingExecutor()
+                runtime = runtime_cls(store=store, executor=executor)
+
+                runtime.tick(now=now)
+
+        select_runnable_job.assert_called_once()
+        self.assertEqual(executor.call_count, 0)
+
+    def test_tick_records_hard_fail_quality_without_calling_executor(self):
+        module = importlib.import_module("core.publishing_runtime")
+        runtime_cls = getattr(module, "PublishingRuntime")
+        now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            self._write_chapter(projects_dir)
+            with patch("core.publishing_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.chapter_source.DATA_PROJECTS_DIR", projects_dir
+            ), patch("core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.canon_store.DATA_PROJECTS_DIR", projects_dir
+            ), patch.object(
+                module,
+                "select_runnable_job",
+                return_value={
+                    "action": "run_now",
+                    "reason": "",
+                    "job": {
+                        "id": "pub1",
+                        "source_path": "chapters/12화.md",
+                        "chapter_title": "Episode 12",
+                        "status": "pending",
+                        "attempt_count": 0,
+                        "targets": {"munpia": {"selected": True, "status": "pending"}},
+                    },
+                },
+            ), patch.object(
+                module,
+                "evaluate_publish_source",
+                return_value={"status": "hard_fail", "errors": ["bad title"], "signals": {}, "raw_report": {"status": "failed"}},
+            ):
+                store = PublishingStore(project_name="sample")
+                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                store.save_queue(
+                    [
+                        {
+                            "id": "pub1",
+                            "source_path": "chapters/12화.md",
+                            "chapter_title": "Episode 12",
+                            "status": "pending",
+                            "attempt_count": 0,
+                            "targets": {"munpia": {"selected": True, "status": "pending"}},
+                        }
+                    ]
+                )
+                executor = FakePublishingExecutor()
+                runtime = runtime_cls(store=store, executor=executor)
+
+                runtime.tick(now=now)
+                queue = store.load_queue()
+
+        self.assertEqual(executor.call_count, 0)
+        self.assertEqual(queue[0]["status"], "failed")
+
+    def test_tick_uses_incident_summary_to_set_runtime_and_job_status(self):
+        module = importlib.import_module("core.publishing_runtime")
+        runtime_cls = getattr(module, "PublishingRuntime")
+        now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            self._write_chapter(projects_dir)
+            with patch("core.publishing_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.chapter_source.DATA_PROJECTS_DIR", projects_dir
+            ), patch("core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.canon_store.DATA_PROJECTS_DIR", projects_dir
+            ), patch.object(
+                module,
+                "select_runnable_job",
+                return_value={
+                    "action": "run_now",
+                    "reason": "",
+                    "job": {
+                        "id": "pub1",
+                        "source_path": "chapters/12화.md",
+                        "chapter_title": "Episode 12",
+                        "status": "pending",
+                        "attempt_count": 0,
+                        "targets": {"munpia": {"selected": True, "status": "pending"}},
+                    },
+                },
+            ), patch.object(
+                module,
+                "evaluate_publish_source",
+                return_value={"status": "publishable", "errors": [], "signals": {}, "raw_report": {"status": "passed"}},
+            ), patch.object(
+                module,
+                "summarize_publish_attempt",
+                return_value={
+                    "job_status": "partial_failed",
+                    "runtime_status": "cooldown",
+                    "incident_type": "platform_incident",
+                    "needs_user_action": False,
+                    "last_error": "timeout",
+                },
+            ):
+                store = PublishingStore(project_name="sample")
+                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                store.save_queue(
+                    [
+                        {
+                            "id": "pub1",
+                            "source_path": "chapters/12화.md",
+                            "chapter_title": "Episode 12",
+                            "status": "pending",
+                            "attempt_count": 0,
+                            "targets": {"munpia": {"selected": True, "status": "pending"}},
+                        }
+                    ]
+                )
+                executor = FakePublishingExecutor()
+                runtime = runtime_cls(store=store, executor=executor)
+
+                runtime.tick(now=now)
+                queue = store.load_queue()
+                state = store.load_runtime()
+
+        self.assertEqual(queue[0]["status"], "partial_failed")
+        self.assertEqual(state["status"], "cooldown")
+        self.assertEqual(state["last_error"], "timeout")
+
+    def test_tick_persists_blocked_runtime_state_from_incident_summary(self):
+        module = importlib.import_module("core.publishing_runtime")
+        runtime_cls = getattr(module, "PublishingRuntime")
+        now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            self._write_chapter(projects_dir)
+            with patch("core.publishing_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.chapter_source.DATA_PROJECTS_DIR", projects_dir
+            ), patch("core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.canon_store.DATA_PROJECTS_DIR", projects_dir
+            ), patch.object(
+                module,
+                "select_runnable_job",
+                return_value={
+                    "action": "run_now",
+                    "reason": "",
+                    "job": {
+                        "id": "pub1",
+                        "source_path": "chapters/12화.md",
+                        "chapter_title": "Episode 12",
+                        "status": "pending",
+                        "attempt_count": 0,
+                        "targets": {"munpia": {"selected": True, "status": "pending"}},
+                    },
+                },
+            ), patch.object(
+                module,
+                "evaluate_publish_source",
+                return_value={"status": "publishable", "errors": [], "signals": {}, "raw_report": {"status": "passed"}},
+            ), patch.object(
+                module,
+                "summarize_publish_attempt",
+                return_value={
+                    "job_status": "failed",
+                    "runtime_status": "blocked",
+                    "incident_type": "data_integrity_incident",
+                    "needs_user_action": False,
+                    "last_error": "no selected targets",
+                },
+            ):
+                store = PublishingStore(project_name="sample")
+                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                store.save_queue(
+                    [
+                        {
+                            "id": "pub1",
+                            "source_path": "chapters/12화.md",
+                            "chapter_title": "Episode 12",
+                            "status": "pending",
+                            "attempt_count": 0,
+                            "targets": {"munpia": {"selected": True, "status": "pending"}},
+                        }
+                    ]
+                )
+                executor = FakePublishingExecutor()
+                runtime = runtime_cls(store=store, executor=executor)
+
+                runtime.tick(now=now)
+                queue = store.load_queue()
+                state = store.load_runtime()
+
+        self.assertEqual(queue[0]["status"], "failed")
+        self.assertEqual(state["status"], "blocked")
+        self.assertEqual(state["last_error"], "no selected targets")
+
+    def test_tick_delegates_canon_finalize_after_successful_publish(self):
+        module = importlib.import_module("core.publishing_runtime")
+        runtime_cls = getattr(module, "PublishingRuntime")
+        now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir) / "projects"
+            self._write_chapter(projects_dir)
+            with patch("core.publishing_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.chapter_source.DATA_PROJECTS_DIR", projects_dir
+            ), patch("core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir), patch(
+                "core.canon_store.DATA_PROJECTS_DIR", projects_dir
+            ), patch.object(
+                module,
+                "select_runnable_job",
+                return_value={
+                    "action": "run_now",
+                    "reason": "",
+                    "job": {
+                        "id": "pub1",
+                        "episode_id": "ep_012",
+                        "source_path": "chapters/12화.md",
+                        "chapter_title": "Episode 12",
+                        "status": "pending",
+                        "attempt_count": 0,
+                        "targets": {"munpia": {"selected": True, "status": "pending"}},
+                    },
+                },
+            ), patch.object(
+                module,
+                "evaluate_publish_source",
+                return_value={"status": "publishable", "errors": [], "signals": {}, "raw_report": {"status": "passed"}},
+            ), patch.object(
+                module,
+                "summarize_publish_attempt",
+                return_value={
+                    "job_status": "done",
+                    "runtime_status": "idle",
+                    "incident_type": "",
+                    "needs_user_action": False,
+                    "last_error": "",
+                },
+            ), patch.object(
+                module,
+                "finalize_publish_canon",
+                return_value={"status": "applied", "source": "result", "candidate": {"timeline": ["ep_012"]}, "error": ""},
+            ) as finalize_publish_canon:
+                store = PublishingStore(project_name="sample")
+                store.save_config({"enabled": True, "schedule": {"type": "daily", "time": "21:00"}})
+                store.save_queue(
+                    [
+                        {
+                            "id": "pub1",
+                            "episode_id": "ep_012",
+                            "source_path": "chapters/12화.md",
+                            "chapter_title": "Episode 12",
+                            "status": "pending",
+                            "attempt_count": 0,
+                            "targets": {"munpia": {"selected": True, "status": "pending"}},
+                        }
+                    ]
+                )
+                executor = FakePublishingExecutor()
+                runtime = runtime_cls(store=store, executor=executor)
+
+                runtime.tick(now=now)
+
+        finalize_publish_canon.assert_called_once()
+
     def test_tick_blocks_publication_when_origin_quality_fails(self):
         runtime_cls = self._load_runtime_cls()
         now = datetime(2026, 3, 12, 21, 0, tzinfo=timezone.utc)
@@ -426,7 +708,7 @@ class TestPublishingRuntime(unittest.TestCase):
             ), patch("core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir), patch(
                 "core.canon_store.DATA_PROJECTS_DIR", projects_dir
             ), patch(
-                "core.publishing_runtime.extract_canon_update",
+                "core.publishing_canon.extract_canon_update",
                 return_value={
                     "people": {"lead": {"mood": "curious"}},
                     "resources": {},
@@ -559,7 +841,7 @@ class TestPublishingRuntime(unittest.TestCase):
             ), patch("core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir), patch(
                 "core.canon_store.DATA_PROJECTS_DIR", projects_dir
             ), patch(
-                "core.publishing_runtime.extract_canon_update",
+                "core.publishing_canon.extract_canon_update",
                 return_value={
                     "people": {"lead": {"mood": "shaken"}},
                     "hooks": ["fresh hook"],
@@ -619,7 +901,7 @@ class TestPublishingRuntime(unittest.TestCase):
             ), patch(
                 "core.episode_artifact_store.DATA_PROJECTS_DIR", projects_dir
             ), patch(
-                "core.publishing_runtime.extract_canon_update",
+                "core.publishing_canon.extract_canon_update",
                 side_effect=AssertionError("extractor should not be called"),
             ):
                 from core.episode_artifact_store import EpisodeArtifactStore
@@ -682,7 +964,7 @@ class TestPublishingRuntime(unittest.TestCase):
             ), patch("core.run_snapshot_store.DATA_PROJECTS_DIR", projects_dir), patch(
                 "core.canon_store.DATA_PROJECTS_DIR", projects_dir
             ), patch(
-                "core.publishing_runtime.extract_canon_update",
+                "core.publishing_canon.extract_canon_update",
                 side_effect=RuntimeError("canon extract failed"),
             ):
                 store = PublishingStore(project_name="sample")

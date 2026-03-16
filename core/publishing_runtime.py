@@ -2,12 +2,12 @@ from copy import deepcopy
 from datetime import datetime
 
 from core.app_paths import DATA_PROJECTS_DIR
-from core.automation_scheduler import is_schedule_due
-from core.canon_candidate import is_empty_canon_candidate, normalize_canon_candidate
-from core.canon_extractor import extract_canon_update
 from core.canon_store import CanonStore
 from core.chapter_source import load_chapter_source
-from core.origin_quality import validate_origin_draft
+from core.publishing_canon import finalize_publish_canon
+from core.publishing_incidents import summarize_publish_attempt
+from core.publishing_policy import select_runnable_job
+from core.publishing_quality import evaluate_publish_source
 from core.publishing_store import PublishingStore
 from core.run_snapshot_store import RunSnapshotStore
 
@@ -29,18 +29,13 @@ class PublishingRuntime:
 
     def tick(self, now: datetime, *, force: bool = False) -> None:
         config = self.store.load_config()
-        if not force and not config.get("enabled", False):
-            return
-
         runtime = self._load_runtime()
-        if runtime["status"] in {"paused", "running"}:
-            return
-
-        if not force and not is_schedule_due(config.get("schedule", {}), now=now, last_run_at=runtime.get("last_run_at")):
-            return
-
         queue = self.store.load_queue()
-        job = next((item for item in queue if item.get("status", "pending") in {"pending", "partial_failed"}), None)
+        decision = self._select_job_decision(config=config, runtime=runtime, queue=queue, now=now, force=force)
+        if decision.get("action") != "run_now":
+            return
+
+        job = _resolve_queue_job(queue, decision.get("job"))
         if job is None:
             return
 
@@ -71,13 +66,11 @@ class PublishingRuntime:
                 },
             },
         )
-        quality_report = validate_origin_draft(
-            title=str(source_payload.get("title", "")),
-            content=str(source_payload.get("content", "")),
-        )
+        publish_quality = evaluate_publish_source(source_payload)
+        quality_report = deepcopy(publish_quality.get("raw_report", {})) or deepcopy(publish_quality)
         self.snapshot_store.write_json_snapshot(run_id, "quality_report.json", quality_report)
-        if quality_report.get("status") != "passed":
-            last_error = "; ".join(str(item) for item in quality_report.get("errors", []))
+        if publish_quality.get("status") != "publishable":
+            last_error = "; ".join(str(item) for item in publish_quality.get("errors", []))
             job["status"] = "failed"
             job["last_error"] = last_error
             runtime["status"] = "idle"
@@ -94,6 +87,7 @@ class PublishingRuntime:
                     "success": False,
                     "platform_results": {},
                     "quality_report": quality_report,
+                    "publish_quality": publish_quality,
                 }
             )
             return
@@ -104,34 +98,23 @@ class PublishingRuntime:
         platform_config_updates = result.get("platform_config_updates", {})
         self._apply_platform_results(job, platform_results)
         self._apply_platform_config_updates(config, platform_config_updates)
-
-        overall_status = _summarize_job_status(job)
-        needs_user_action = any(
-            payload.get("error_type") == "requires_user_action"
-            for payload in platform_results.values()
-            if isinstance(payload, dict)
-        )
-        last_error = next(
-            (
-                str(payload.get("error_text", "")).strip()
-                for payload in platform_results.values()
-                if isinstance(payload, dict) and str(payload.get("error_text", "")).strip()
-            ),
-            "",
-        )
-        episode_id = str(job.get("episode_id", "")).strip()
-        canon_update_report = _build_canon_update_report(
+        publish_summary = summarize_publish_attempt(job=job, platform_results=platform_results)
+        overall_status = str(publish_summary.get("job_status", "failed"))
+        last_error = str(publish_summary.get("last_error", "")).strip()
+        canon_update_report = finalize_publish_canon(
+            project_name=self.store.project_name,
+            episode_id=str(job.get("episode_id", "")).strip(),
+            overall_status=overall_status,
             job=job,
             result=result,
             source_payload=source_payload,
-            project_name=self.store.project_name,
-            overall_status=overall_status,
-            episode_id=episode_id,
+            canon_store=self.canon_store,
+            now=now,
         )
 
         job["status"] = overall_status
         job["last_error"] = last_error
-        runtime["status"] = "paused" if needs_user_action else "idle"
+        runtime["status"] = str(publish_summary.get("runtime_status", "idle"))
         runtime["current_job_id"] = None
         runtime["last_run_at"] = now.isoformat()
         runtime["last_error"] = last_error
@@ -139,20 +122,6 @@ class PublishingRuntime:
         self.store.save_queue(queue)
         self.store.save_runtime(runtime)
         self.snapshot_store.write_json_snapshot(run_id, "canon_update.json", canon_update_report)
-        if overall_status == "done" and episode_id:
-            self.canon_store.append_event(
-                {
-                    "timestamp": now.isoformat(),
-                    "episode_id": episode_id,
-                    "kind": "origin_publish_success",
-                    "chapter_title": job.get("chapter_title", ""),
-                    "canon_update_status": canon_update_report["status"],
-                    "canon_update_source": canon_update_report["source"],
-                }
-            )
-            if canon_update_report["status"] == "applied":
-                canon_state = self.canon_store.apply_state_update(canon_update_report["candidate"])
-                self.canon_store.write_snapshot(episode_id, canon_state)
         self.store.append_history(
             {
                 "timestamp": now.isoformat(),
@@ -161,6 +130,8 @@ class PublishingRuntime:
                 "success": overall_status == "done",
                 "platform_results": platform_results,
                 "quality_report": quality_report,
+                "publish_quality": publish_quality,
+                "incident_type": publish_summary.get("incident_type", ""),
                 "canon_update": canon_update_report,
             }
         )
@@ -190,107 +161,28 @@ class PublishingRuntime:
                 continue
             platform_config.update(updates)
 
-
-def _summarize_job_status(job: dict) -> str:
-    selected_statuses = [
-        payload.get("status", "pending")
-        for payload in job.get("targets", {}).values()
-        if isinstance(payload, dict) and payload.get("selected")
-    ]
-    if not selected_statuses:
-        return "failed"
-    if all(status == "done" for status in selected_statuses):
-        return "done"
-    if any(status == "done" for status in selected_statuses):
-        return "partial_failed"
-    return "failed"
+    def _select_job_decision(self, *, config: dict, runtime: dict, queue: list[dict], now: datetime, force: bool) -> dict:
+        if force:
+            if runtime["status"] in {"paused", "running"}:
+                return {"action": "skip", "reason": runtime["status"], "job": None}
+            for item in queue:
+                if item.get("status", "pending") in {"pending", "partial_failed"}:
+                    return {"action": "run_now", "reason": "", "job": item}
+            return {"action": "skip", "reason": "no_job", "job": None}
+        return select_runnable_job(config=config, runtime=runtime, queue=queue, now=now)
 
 
-def _build_canon_update_report(
-    *,
-    job: dict,
-    result: dict,
-    source_payload: dict,
-    project_name: str,
-    overall_status: str,
-    episode_id: str,
-) -> dict:
-    empty_candidate = normalize_canon_candidate({})
-    if overall_status != "done" or not episode_id:
-        return {
-            "status": "skipped",
-            "source": "none",
-            "candidate": empty_candidate,
-            "error": "",
-        }
-
-    for source_name, raw_candidate in (("result", result.get("canon_update")), ("job", job.get("canon_update"))):
-        if not isinstance(raw_candidate, dict):
-            continue
-        candidate = normalize_canon_candidate(raw_candidate)
-        if is_empty_canon_candidate(candidate):
-            continue
-        return {
-            "status": "applied",
-            "source": source_name,
-            "candidate": _ensure_episode_timeline(candidate, episode_id),
-            "error": "",
-        }
-
-    source_candidate = source_payload.get("canon_update")
-    if isinstance(source_candidate, dict):
-        candidate = normalize_canon_candidate(source_candidate)
-        if not is_empty_canon_candidate(candidate):
-            return {
-                "status": "applied",
-                "source": "artifact",
-                "candidate": _ensure_episode_timeline(candidate, episode_id),
-                "error": "",
-            }
-
-    content = str(source_payload.get("content", "")).strip()
-    if not content:
-        return {
-            "status": "skipped",
-            "source": "none",
-            "candidate": empty_candidate,
-            "error": "",
-        }
-
-    try:
-        extracted = extract_canon_update(content, project_name=project_name)
-    except Exception as exc:
-        return {
-            "status": "failed",
-            "source": "extractor",
-            "candidate": empty_candidate,
-            "error": str(exc),
-        }
-
-    candidate = normalize_canon_candidate(extracted)
-    if is_empty_canon_candidate(candidate):
-        return {
-            "status": "skipped",
-            "source": "extractor",
-            "candidate": candidate,
-            "error": "",
-        }
-
-    return {
-        "status": "applied",
-        "source": "extractor",
-        "candidate": _ensure_episode_timeline(candidate, episode_id),
-        "error": "",
-    }
-
-
-def _ensure_episode_timeline(candidate: dict, episode_id: str) -> dict:
-    merged = normalize_canon_candidate(candidate)
-    timeline = list(merged.get("timeline", []))
-    if episode_id not in timeline:
-        timeline.append(episode_id)
-    merged["timeline"] = timeline
-    return merged
+def _resolve_queue_job(queue: list[dict], selected_job: dict | None) -> dict | None:
+    if not isinstance(selected_job, dict):
+        return None
+    selected_id = str(selected_job.get("id", "")).strip()
+    if selected_id:
+        for item in queue:
+            if str(item.get("id", "")).strip() == selected_id:
+                return item
+    if selected_job in queue:
+        return selected_job
+    return None
 
 
 def run_publishing_pass(*, now: datetime, executor_factory) -> None:

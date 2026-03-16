@@ -24,12 +24,20 @@ def finalize_publish_canon(
             "error": "",
         }
 
-    candidate, source = _resolve_candidate(
-        project_name=project_name,
-        job=job,
-        result=result,
-        source_payload=source_payload,
-    )
+    try:
+        candidate, source = _resolve_candidate(
+            project_name=project_name,
+            job=job,
+            result=result,
+            source_payload=source_payload,
+        )
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "source": "extractor",
+            "candidate": empty_candidate,
+            "error": str(exc),
+        }
     if is_empty_canon_candidate(candidate):
         return {
             "status": "skipped",
@@ -38,6 +46,7 @@ def finalize_publish_canon(
             "error": "",
         }
 
+    candidate = _ensure_episode_timeline(candidate, episode_id)
     state = canon_store.apply_state_update(candidate)
     canon_store.append_event(
         {
@@ -74,3 +83,12 @@ def _resolve_candidate(*, project_name: str, job: dict, result: dict, source_pay
         return extracted, "extractor"
 
     return normalize_canon_candidate({}), "none"
+
+
+def _ensure_episode_timeline(candidate: dict, episode_id: str) -> dict:
+    merged = normalize_canon_candidate(candidate)
+    timeline = list(merged.get("timeline", []))
+    if episode_id not in timeline:
+        timeline.append(episode_id)
+    merged["timeline"] = timeline
+    return merged
