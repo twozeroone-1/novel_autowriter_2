@@ -10,7 +10,10 @@ The goal is not to reopen broad design work. The goal is to decide whether phase
 
 Current evidence baseline:
 
-- curated regression suite currently passes at `350 tests`
+- curated regression suite passes at `332 tests`
+- publishing-focused regression passes at `124 tests`
+- smoke command exists and can validate login/editor readiness without uploading
+- platform credential loader now supports env fallback when secure storage is unavailable
 - publish control plane includes:
   - planner
   - quality gate
@@ -199,6 +202,17 @@ Recommended next actions, in order:
 1. run manual smoke tests against real platform test accounts
 2. treat any smoke-test failures as selector/adapter bugfix work under phases 3-4
 3. if smoke tests hold, decide whether to start phase 5 or pause and stabilize
+
+## Post-closeout operational prerequisites
+
+Phases 1-4 are closed at the product architecture level, but a project is not operationally ready until these are filled in per project:
+
+1. `publishing/config.json` has real `work_id`
+2. `publishing/config.json` has real `upload_url_template` and any required selector overrides
+3. credentials are available through keyring or env fallback
+4. `scripts/publishing_smoke.py` succeeds at least once against real platform accounts
+
+That remaining work is validation and configuration, not missing system architecture.
 
 ## Final Judgment
 
