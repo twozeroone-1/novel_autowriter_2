@@ -110,12 +110,12 @@ class TestContextManager(unittest.TestCase):
                 expected_summary = manager.build_updated_summary_text("new summary")
 
                 with patch.object(manager, "save_previous_summary") as save_previous_summary, patch.object(
-                    manager, "save_config"
-                ) as save_config:
+                    manager, "save_story_bible_sections"
+                ) as save_story_bible_sections:
                     manager.update_summary("new summary")
 
                 save_previous_summary.assert_called_once_with(expected_summary)
-                save_config.assert_not_called()
+                save_story_bible_sections.assert_not_called()
 
     def test_build_updated_summary_text_returns_combined_preview_without_saving(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -160,11 +160,7 @@ class TestContextManager(unittest.TestCase):
                     manager,
                     "save_previous_summary",
                     wraps=manager.save_previous_summary,
-                ) as save_previous_summary, patch.object(
-                    manager,
-                    "save_config",
-                    side_effect=AssertionError("save_config should not be used"),
-                ):
+                ) as save_previous_summary:
                     result = manager.apply_context_updates(
                         state="   ",
                         summary_of_previous="new summary",
@@ -215,19 +211,8 @@ class TestContextManager(unittest.TestCase):
     def test_context_manager_no_longer_exposes_save_config_alias(self):
         self.assertFalse(hasattr(ContextManager, "save_config"))
 
-    # Compatibility alias path
-
-    def test_default_config_compatibility_alias_points_to_story_bible_defaults(self):
-        self.assertIs(context_module.DEFAULT_CONFIG, context_module.DEFAULT_STORY_BIBLE_SETTINGS)
-
     def test_get_story_bible_settings_docstring_marks_primary_api(self):
         self.assertIn("primary", ContextManager.get_story_bible_settings.__doc__ or "")
-
-    def test_get_config_docstring_marks_compatibility_alias(self):
-        self.assertIn("compatibility", ContextManager.get_config.__doc__ or "")
-
-    def test_save_config_docstring_marks_compatibility_alias(self):
-        self.assertIn("compatibility", ContextManager.save_config.__doc__ or "")
 
     def test_get_story_bible_settings_returns_story_bible_compatibility_view(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -251,20 +236,6 @@ class TestContextManager(unittest.TestCase):
                         "continuity": "structured rules",
                     },
                 )
-
-    def test_get_config_compatibility_alias_matches_story_bible_settings(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
-                story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
-            ):
-                manager = ContextManager(project_name="sample")
-                manager.save_story_bible_sections(
-                    worldview="structured world",
-                    tone_and_manner="structured style",
-                    continuity="structured rules",
-                )
-
-                self.assertEqual(manager.get_config(), manager.get_story_bible_settings())
 
     def test_get_story_bible_settings_do_not_expose_state_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -298,7 +269,7 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(workspace_settings["state"], "stored state")
                 self.assertEqual(workspace_settings["summary_of_previous"], "stored summary")
 
-    def test_get_worldview_context_reads_story_bible_without_get_config(self):
+    def test_get_worldview_context_reads_story_bible_prompt_fields_without_public_settings_view(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
                 story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
@@ -310,13 +281,17 @@ class TestContextManager(unittest.TestCase):
                     continuity="structured rules",
                 )
 
-                with patch.object(manager, "get_config", side_effect=AssertionError("get_config should not be used")):
+                with patch.object(
+                    manager,
+                    "get_story_bible_settings",
+                    side_effect=AssertionError("get_story_bible_settings should not be used"),
+                ):
                     context_text = manager.get_worldview_context()
 
                 self.assertIn("structured world", context_text)
                 self.assertIn("structured style", context_text)
 
-    def test_get_continuity_context_reads_story_bible_without_get_config(self):
+    def test_get_continuity_context_reads_story_bible_prompt_fields_without_public_settings_view(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
                 story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
@@ -328,31 +303,43 @@ class TestContextManager(unittest.TestCase):
                     continuity="structured rules",
                 )
 
-                with patch.object(manager, "get_config", side_effect=AssertionError("get_config should not be used")):
+                with patch.object(
+                    manager,
+                    "get_story_bible_settings",
+                    side_effect=AssertionError("get_story_bible_settings should not be used"),
+                ):
                     context_text = manager.get_continuity_context()
 
                 self.assertIn("structured rules", context_text)
 
-    def test_get_state_context_reads_state_snapshot_without_get_config(self):
+    def test_get_state_context_reads_state_snapshot_without_workspace_settings(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)):
                 manager = ContextManager(project_name="sample")
                 manager.save_state("current state")
                 manager.save_previous_summary("previous summary")
 
-                with patch.object(manager, "get_config", side_effect=AssertionError("get_config should not be used")):
+                with patch.object(
+                    manager,
+                    "get_workspace_settings",
+                    side_effect=AssertionError("get_workspace_settings should not be used"),
+                ):
                     context_text = manager.get_state_context()
 
                 self.assertIn("current state", context_text)
                 self.assertIn("previous summary", context_text)
 
-    def test_build_updated_summary_text_reads_existing_summary_without_get_config(self):
+    def test_build_updated_summary_text_reads_existing_summary_without_workspace_settings(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)):
                 manager = ContextManager(project_name="sample")
                 manager.save_previous_summary("existing summary")
 
-                with patch.object(manager, "get_config", side_effect=AssertionError("get_config should not be used")):
+                with patch.object(
+                    manager,
+                    "get_workspace_settings",
+                    side_effect=AssertionError("get_workspace_settings should not be used"),
+                ):
                     preview = manager.build_updated_summary_text("new summary")
 
                 self.assertIn("existing summary", preview)
@@ -438,29 +425,7 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(workspace_settings["state"], "legacy state")
                 self.assertEqual(workspace_settings["summary_of_previous"], "legacy summary")
 
-    # Compatibility alias write path
-
-    def test_save_config_compatibility_alias_updates_story_bible_store_fields(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
-                story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
-            ):
-                manager = ContextManager(project_name="sample")
-
-                manager.save_config(
-                    {
-                        **context_module.DEFAULT_CONFIG,
-                        "worldview": "new world",
-                        "tone_and_manner": "new style",
-                        "continuity": "new rules",
-                    }
-                )
-
-                story_bible = StoryBibleStore(project_name="sample").load()
-
-                self.assertEqual(story_bible["worldview"], "new world")
-                self.assertEqual(story_bible["style_guide"], "new style")
-                self.assertEqual(story_bible["fixed_rules"], "new rules")
+    # Primary Story Bible write path
 
     def test_get_workspace_settings_reads_story_bible_and_legacy_state_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -534,6 +499,54 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(settings["worldview"], "new world")
                 self.assertEqual(settings["tone_and_manner"], "new style")
                 self.assertEqual(settings["continuity"], "new rules")
+
+    def test_save_story_bible_sections_does_not_modify_context_state_store(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ), patch.object(context_state_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)):
+                manager = ContextManager(project_name="sample")
+                manager.save_state("stored state")
+                manager.save_previous_summary("stored summary")
+
+                before = ContextStateStore(project_name="sample").load()
+                manager.save_story_bible_sections(
+                    worldview="new world",
+                    tone_and_manner="new style",
+                    continuity="new rules",
+                )
+
+                workspace_settings = manager.get_workspace_settings()
+                after = ContextStateStore(project_name="sample").load()
+                legacy_config = json.loads(manager.config_path.read_text(encoding="utf-8"))
+
+                self.assertEqual(after, before)
+                self.assertEqual(workspace_settings["state"], "stored state")
+                self.assertEqual(workspace_settings["summary_of_previous"], "stored summary")
+                self.assertEqual(legacy_config["state"], "stored state")
+                self.assertEqual(legacy_config["summary_of_previous"], "stored summary")
+
+    def test_save_story_bible_sections_does_not_modify_plot_store(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
+                story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
+            ), patch.object(plot_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)):
+                manager = ContextManager(project_name="sample")
+                manager.save_plot_outline("stored plot")
+
+                before = PlotStore(project_name="sample").load()
+                manager.save_story_bible_sections(
+                    worldview="new world",
+                    tone_and_manner="new style",
+                    continuity="new rules",
+                )
+
+                after = PlotStore(project_name="sample").load()
+                legacy_config = json.loads(manager.config_path.read_text(encoding="utf-8"))
+
+                self.assertEqual(after, before)
+                self.assertEqual(legacy_config["plot_outline"], "stored plot")
+                self.assertEqual(legacy_config["plot_version"], "1")
 
     def test_new_project_config_initializes_story_bible_shadow_only(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -629,8 +642,12 @@ class TestContextManager(unittest.TestCase):
                     wraps=manager.save_story_bible_sections,
                 ) as save_story_bible_sections, patch.object(
                     manager,
-                    "save_config",
-                    side_effect=AssertionError("save_config should not be used"),
+                    "save_state",
+                    side_effect=AssertionError("save_state should not be used"),
+                ), patch.object(
+                    manager,
+                    "save_previous_summary",
+                    side_effect=AssertionError("save_previous_summary should not be used"),
                 ):
                     manager.update_worldview("new world")
 
@@ -698,150 +715,6 @@ class TestContextManager(unittest.TestCase):
 
                 self.assertEqual(plot_outline, "legacy plot")
 
-    def test_save_config_compatibility_alias_ignores_plot_fields_and_keeps_existing_plot_store_value(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
-                plot_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
-            ), patch.object(story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)):
-                manager = ContextManager(project_name="sample")
-                manager.save_plot_outline("stored plot")
-
-                manager.save_config(
-                    {
-                        **context_module.DEFAULT_CONFIG,
-                        "worldview": "new world",
-                        "tone_and_manner": "new style",
-                        "continuity": "new rules",
-                        "plot_outline": "ignored plot",
-                        "plot_version": "99",
-                    }
-                )
-
-                settings = manager.get_story_bible_settings()
-                plot_payload = PlotStore(project_name="sample").load()
-
-                self.assertEqual(settings["worldview"], "new world")
-                self.assertNotIn("plot_outline", settings)
-                self.assertNotIn("plot_version", settings)
-                self.assertEqual(plot_payload["plot_outline"], "stored plot")
-                self.assertEqual(plot_payload["plot_version"], "1")
-
-    def test_save_config_compatibility_alias_routes_story_bible_shadow_write_through_shared_helper(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
-                story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
-            ):
-                manager = ContextManager(project_name="sample")
-
-                with patch.object(
-                    manager,
-                    "_write_story_bible_shadow",
-                    wraps=manager._write_story_bible_shadow,
-                ) as write_story_bible_shadow:
-                    manager.save_config(
-                        {
-                            **context_module.DEFAULT_CONFIG,
-                            "worldview": "new world",
-                            "tone_and_manner": "new style",
-                            "continuity": "new rules",
-                        }
-                    )
-
-                write_story_bible_shadow.assert_called_once_with(
-                    worldview="new world",
-                    tone_and_manner="new style",
-                    continuity="new rules",
-                )
-                story_bible = StoryBibleStore(project_name="sample").load()
-                self.assertEqual(story_bible["worldview"], "new world")
-                self.assertEqual(story_bible["style_guide"], "new style")
-                self.assertEqual(story_bible["fixed_rules"], "new rules")
-
-    def test_save_config_compatibility_alias_delegates_to_save_story_bible_sections(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)):
-                manager = ContextManager(project_name="sample")
-
-                with patch.object(
-                    manager,
-                    "save_story_bible_sections",
-                    wraps=manager.save_story_bible_sections,
-                ) as save_story_bible_sections:
-                    manager.save_config(
-                        {
-                            **context_module.DEFAULT_CONFIG,
-                            "worldview": "new world",
-                            "tone_and_manner": "new style",
-                            "continuity": "new rules",
-                        }
-                    )
-
-                save_story_bible_sections.assert_called_once_with(
-                    worldview="new world",
-                    tone_and_manner="new style",
-                    continuity="new rules",
-                )
-
-    def test_save_config_compatibility_alias_ignores_state_fields_and_preserves_existing_context_state_store_value(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
-                story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
-            ), patch.object(context_state_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)):
-                manager = ContextManager(project_name="sample")
-                manager.save_state("stored state")
-                manager.save_previous_summary("stored summary")
-
-                manager.save_config(
-                    {
-                        **context_module.DEFAULT_CONFIG,
-                        "worldview": "new world",
-                        "tone_and_manner": "new style",
-                        "continuity": "new rules",
-                        "state": "ignored state",
-                        "summary_of_previous": "ignored summary",
-                    }
-                )
-
-                settings = manager.get_story_bible_settings()
-                workspace_settings = manager.get_workspace_settings()
-                state_payload = ContextStateStore(project_name="sample").load()
-                legacy_config = json.loads(manager.config_path.read_text(encoding="utf-8"))
-
-                self.assertEqual(settings["worldview"], "new world")
-                self.assertNotIn("state", settings)
-                self.assertNotIn("summary_of_previous", settings)
-                self.assertEqual(workspace_settings["state"], "stored state")
-                self.assertEqual(workspace_settings["summary_of_previous"], "stored summary")
-                self.assertEqual(state_payload["state"], "stored state")
-                self.assertEqual(state_payload["summary_of_previous"], "stored summary")
-                self.assertEqual(legacy_config["state"], "stored state")
-                self.assertEqual(legacy_config["summary_of_previous"], "stored summary")
-
-    def test_save_config_compatibility_alias_does_not_create_context_state_store_from_state_fields(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
-                story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
-            ), patch.object(context_state_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)):
-                manager = ContextManager(project_name="sample")
-
-                manager.save_config(
-                    {
-                        **context_module.DEFAULT_CONFIG,
-                        "worldview": "new world",
-                        "tone_and_manner": "new style",
-                        "continuity": "new rules",
-                        "state": "ignored state",
-                        "summary_of_previous": "ignored summary",
-                    }
-                )
-
-                state_store = ContextStateStore(project_name="sample")
-                legacy_config = json.loads(manager.config_path.read_text(encoding="utf-8"))
-
-                self.assertFalse(state_store.context_state_path.exists())
-                self.assertNotIn("state", legacy_config)
-                self.assertNotIn("summary_of_previous", legacy_config)
-
     def test_save_plot_outline_updates_plot_store_and_legacy_shadow_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
@@ -860,7 +733,11 @@ class TestContextManager(unittest.TestCase):
                     encoding="utf-8",
                 )
 
-                with patch.object(manager, "save_config", side_effect=AssertionError("save_config should not be used")):
+                with patch.object(
+                    manager,
+                    "save_story_bible_sections",
+                    side_effect=AssertionError("save_story_bible_sections should not be used"),
+                ):
                     manager.save_plot_outline("new stored plot")
 
                 plot_payload = PlotStore(project_name="sample").load()
