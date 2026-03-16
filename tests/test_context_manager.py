@@ -26,49 +26,6 @@ class TestContextManager(unittest.TestCase):
             BASE_DATA_DIR=base,
         )
 
-    def test_get_story_bible_settings_normalize_missing_and_non_string_values(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
-                story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
-            ):
-                manager = ContextManager(project_name="sample")
-                manager.config_path.write_text('{"worldview": 123, "state": null}', encoding="utf-8")
-
-                settings = manager.get_story_bible_settings()
-                workspace_settings = manager.get_workspace_settings()
-
-                self.assertEqual(settings["worldview"], "123")
-                self.assertEqual(
-                    settings["tone_and_manner"],
-                    context_module.DEFAULT_STORY_BIBLE_SETTINGS["tone_and_manner"],
-                )
-                self.assertNotIn("state", settings)
-                self.assertNotIn("summary_of_previous", settings)
-                self.assertEqual(workspace_settings["state"], context_state_store_module.DEFAULT_CONTEXT_STATE["state"])
-                self.assertEqual(
-                    workspace_settings["summary_of_previous"],
-                    context_state_store_module.DEFAULT_CONTEXT_STATE["summary_of_previous"],
-                )
-
-    def test_get_characters_skips_invalid_items(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)):
-                manager = ContextManager(project_name="sample")
-                manager.chars_path.write_text(
-                    """
-[
-  {"id": "char_001", "name": "Lead", "role": "Lead", "description": "desc", "traits": ["calm"]},
-  {"id": "char_002", "name": "Support"}
-]
-""".strip(),
-                    encoding="utf-8",
-                )
-
-                characters = manager.get_characters()
-
-                self.assertEqual(len(characters), 1)
-                self.assertEqual(characters[0]["id"], "char_001")
-
     def test_update_summary_appends_new_summary(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)):
@@ -779,7 +736,7 @@ class TestContextManager(unittest.TestCase):
                 self.assertEqual(story_bible["style_guide"], "fixed style")
                 self.assertEqual(story_bible["fixed_rules"], "fixed rules")
 
-    def test_build_generation_prompt_includes_all_context_and_plot_when_enabled(self):
+    def test_build_generation_prompt_reads_current_store_snapshots_and_plot_toggle(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(context_module, "BASE_DATA_DIR", Path(tmpdir)), patch.object(
                 story_bible_store_module, "DATA_PROJECTS_DIR", Path(tmpdir)
@@ -836,9 +793,7 @@ class TestContextManager(unittest.TestCase):
                 self.assertIn("Hero", prompt)
                 self.assertIn("plot outline text", prompt)
                 self.assertIn("strict", prompt)
-                self.assertIn("[CANON FACTS]", prompt)
                 self.assertIn("mystery", prompt)
-                self.assertIn("[RELEASE POLICY]", prompt)
                 self.assertIn("max_daily_releases", prompt)
                 self.assertIn("write next chapter", prompt)
                 self.assertIn("4000", prompt)

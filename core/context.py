@@ -20,9 +20,7 @@ from core.context_story_bible_shadow import (
     DEFAULT_STORY_BIBLE_SHADOW,
     load_raw_config_payload,
     load_story_bible_shadow_payload,
-    normalize_story_bible_shadow_payload,
     write_story_bible_shadow,
-    write_story_bible_shadow_payload,
 )
 from core.file_utils import atomic_write_json
 from core.plot_store import DEFAULT_PLOT, PlotStore
@@ -82,19 +80,6 @@ class ContextManager:
 
         return data
 
-    def _normalize_story_bible_shadow_payload(self, payload: dict | list) -> dict:
-        merged = DEFAULT_STORY_BIBLE_SHADOW.copy()
-        if not isinstance(payload, dict):
-            return merged
-
-        for key, default_value in DEFAULT_STORY_BIBLE_SHADOW.items():
-            value = payload.get(key, default_value)
-            if value is None:
-                merged[key] = default_value
-            else:
-                merged[key] = value if isinstance(value, str) else str(value)
-        return merged
-
     def _load_story_bible_shadow_payload(self) -> dict:
         return load_story_bible_shadow_payload(self.config_path)
 
@@ -126,9 +111,6 @@ class ContextManager:
             merged["continuity"] = story_bible.get("fixed_rules", merged["continuity"])
 
         return merged
-
-    def _write_story_bible_shadow_payload(self, payload: dict) -> None:
-        write_story_bible_shadow_payload(self.config_path, payload)
 
     def _write_story_bible_shadow(
         self,
