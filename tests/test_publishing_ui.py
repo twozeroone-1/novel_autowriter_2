@@ -1,12 +1,45 @@
 import importlib
 import importlib.util
+import sys
+import types
 import unittest
+
+
+def _install_fake_streamlit():
+    fake_streamlit = types.SimpleNamespace(
+        text_area=lambda *args, **kwargs: None,
+        checkbox=lambda *args, **kwargs: False,
+        selectbox=lambda *args, **kwargs: None,
+        number_input=lambda *args, **kwargs: 0,
+        time_input=lambda *args, **kwargs: None,
+        multiselect=lambda *args, **kwargs: [],
+        button=lambda *args, **kwargs: False,
+        form=lambda *args, **kwargs: None,
+        form_submit_button=lambda *args, **kwargs: False,
+        columns=lambda *args, **kwargs: [],
+        metric=lambda *args, **kwargs: None,
+        divider=lambda *args, **kwargs: None,
+        subheader=lambda *args, **kwargs: None,
+        header=lambda *args, **kwargs: None,
+        caption=lambda *args, **kwargs: None,
+        info=lambda *args, **kwargs: None,
+        warning=lambda *args, **kwargs: None,
+        success=lambda *args, **kwargs: None,
+        dataframe=lambda *args, **kwargs: None,
+        write=lambda *args, **kwargs: None,
+        rerun=lambda *args, **kwargs: None,
+        expander=lambda *args, **kwargs: None,
+        session_state={},
+    )
+    sys.modules["streamlit"] = fake_streamlit
 
 
 class TestPublishingUi(unittest.TestCase):
     def _load_module(self):
         spec = importlib.util.find_spec("ui.publishing")
         self.assertIsNotNone(spec, "ui.publishing should exist")
+        _install_fake_streamlit()
+        sys.modules.pop("ui.publishing", None)
         return importlib.import_module("ui.publishing")
 
     def test_format_publishing_schedule_summary_for_daily_rule(self):
@@ -55,6 +88,28 @@ class TestPublishingUi(unittest.TestCase):
         status = module.format_publishing_runtime_status(runtime)
 
         self.assertEqual(status, "일시중지: login failed")
+
+    def test_format_publishing_runtime_status_reports_cooldown_error(self):
+        module = self._load_module()
+        runtime = {
+            "status": "cooldown",
+            "last_error": "timeout",
+        }
+
+        status = module.format_publishing_runtime_status(runtime)
+
+        self.assertEqual(status, "쿨다운: timeout")
+
+    def test_format_publishing_runtime_status_reports_blocked_error(self):
+        module = self._load_module()
+        runtime = {
+            "status": "blocked",
+            "last_error": "no selected targets",
+        }
+
+        status = module.format_publishing_runtime_status(runtime)
+
+        self.assertEqual(status, "차단됨: no selected targets")
 
     def test_build_publishing_history_summary_counts_total_success_and_failure(self):
         module = self._load_module()

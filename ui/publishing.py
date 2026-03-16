@@ -76,10 +76,14 @@ def format_publishing_schedule_summary(config: dict) -> str:
 
 def format_publishing_runtime_status(runtime: dict) -> str:
     status = runtime.get("status", "idle")
+    error = str(runtime.get("last_error", "")).strip()
     if status == "running":
         return "실행 중"
+    if status == "cooldown":
+        return f"쿨다운: {error}" if error else "쿨다운"
+    if status == "blocked":
+        return f"차단됨: {error}" if error else "차단됨"
     if status == "paused":
-        error = str(runtime.get("last_error", "")).strip()
         return f"일시중지: {error}" if error else "일시중지"
     return "대기 중"
 
