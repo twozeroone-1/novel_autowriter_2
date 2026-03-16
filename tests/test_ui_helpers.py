@@ -44,6 +44,7 @@ from ui.chapters import (
     select_context_update_value,
 )
 from ui.workspace import (
+    build_project_settings_status_snapshot,
     ProjectFieldSpec,
     apply_pending_project_textarea_updates,
     build_canon_store_summary,
@@ -431,6 +432,81 @@ class TestUiHelpers(unittest.TestCase):
         self.assertEqual(summary.cooldown_failures, 3)
         self.assertEqual(summary.enabled_platforms, ("munpia", "royalroad"))
 
+    def test_build_project_settings_status_snapshot_counts_core_documents_and_attention(self):
+        panels = (
+            types.SimpleNamespace(spec=types.SimpleNamespace(section_title="1. STORY BIBLE"), char_count=400, status="적정"),
+            types.SimpleNamespace(spec=types.SimpleNamespace(section_title="2. STYLE GUIDE"), char_count=0, status="비어 있음"),
+            types.SimpleNamespace(spec=types.SimpleNamespace(section_title="3. CONTINUITY"), char_count=300, status="적정"),
+            types.SimpleNamespace(spec=types.SimpleNamespace(section_title="4. STATE"), char_count=900, status="너무 김"),
+        )
+
+        snapshot = build_project_settings_status_snapshot(
+            panels,
+            saved_summary_text="saved summary",
+            editor_summary_text="saved summary",
+            canon_summary=build_canon_store_summary({"people": {"Hero": {}}, "resources": {}, "hooks": [], "timeline": []}),
+            release_summary=build_release_policy_summary({"global": {}, "platforms": {"munpia": {"enabled": True}}}),
+        )
+
+        self.assertEqual(snapshot.filled_count, 3)
+        self.assertEqual(snapshot.attention_count, 2)
+        self.assertEqual(snapshot.total_config_chars, 1600)
+        self.assertEqual(snapshot.previous_summary_status, "saved")
+        self.assertIn("Canon 1", snapshot.structured_store_label)
+        self.assertIn("플랫폼 1", snapshot.structured_store_label)
+
+    def test_build_project_settings_status_snapshot_marks_previous_summary_states(self):
+        panels = ()
+        canon_summary = build_canon_store_summary({"people": {}, "resources": {}, "hooks": [], "timeline": []})
+        release_summary = build_release_policy_summary({"global": {}, "platforms": {}})
+
+        empty_snapshot = build_project_settings_status_snapshot(
+            panels,
+            saved_summary_text="",
+            editor_summary_text="",
+            canon_summary=canon_summary,
+            release_summary=release_summary,
+        )
+        editing_snapshot = build_project_settings_status_snapshot(
+            panels,
+            saved_summary_text="saved",
+            editor_summary_text="edited",
+            canon_summary=canon_summary,
+            release_summary=release_summary,
+        )
+        saved_snapshot = build_project_settings_status_snapshot(
+            panels,
+            saved_summary_text="saved",
+            editor_summary_text="saved",
+            canon_summary=canon_summary,
+            release_summary=release_summary,
+        )
+
+        self.assertEqual(empty_snapshot.previous_summary_status, "empty")
+        self.assertEqual(editing_snapshot.previous_summary_status, "editing")
+        self.assertEqual(saved_snapshot.previous_summary_status, "saved")
+
+    def test_build_project_settings_status_snapshot_generates_warnings_and_actions(self):
+        panels = (
+            types.SimpleNamespace(spec=types.SimpleNamespace(section_title="1. STORY BIBLE"), char_count=0, status="비어 있음"),
+            types.SimpleNamespace(spec=types.SimpleNamespace(section_title="2. STYLE GUIDE"), char_count=720, status="너무 김"),
+        )
+
+        snapshot = build_project_settings_status_snapshot(
+            panels,
+            saved_summary_text="",
+            editor_summary_text="",
+            canon_summary=build_canon_store_summary({"people": {}, "resources": {}, "hooks": [], "timeline": []}),
+            release_summary=build_release_policy_summary({"global": {}, "platforms": {}}),
+        )
+
+        self.assertIn("STORY BIBLE이 비어 있습니다.", snapshot.warnings)
+        self.assertIn("STYLE GUIDE 길이를 조정해야 합니다.", snapshot.warnings)
+        self.assertIn("PREVIOUS SUMMARY가 비어 있습니다.", snapshot.warnings)
+        self.assertIn("STORY BIBLE 초안을 먼저 작성하세요.", snapshot.recommended_actions)
+        self.assertIn("STYLE GUIDE를 AI 보조 버튼으로 압축하거나 정리하세요.", snapshot.recommended_actions)
+        self.assertIn("PREVIOUS SUMMARY 제안 생성을 사용해 최근 줄거리 기준선을 채우세요.", snapshot.recommended_actions)
+
     def test_persist_workspace_field_routes_story_bible_updates_through_story_store(self):
         class FakeContext:
             def __init__(self):
@@ -587,6 +663,142 @@ class TestUiHelpers(unittest.TestCase):
         apply_pending_project_textarea_updates(session_state)
 
         self.assertEqual(session_state, {"ta_state": "old state"})
+
+    def test_render_project_settings_tab_renders_status_sections_before_editor_sections(self):
+        class FakeColumn:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeStreamlit:
+            def __init__(self):
+                self.session_state = {}
+                self.events = []
+
+            def header(self, label, *args, **kwargs):
+                self.events.append(f"header:{label}")
+
+            def markdown(self, label, *args, **kwargs):
+                self.events.append(f"markdown:{label}")
+
+            def caption(self, label, *args, **kwargs):
+                self.events.append(f"caption:{label}")
+
+            def success(self, label, *args, **kwargs):
+                self.events.append(f"success:{label}")
+
+            def metric(self, label, value, *args, **kwargs):
+                self.events.append(f"metric:{label}:{value}")
+
+            def divider(self, *args, **kwargs):
+                self.events.append("divider")
+
+            def columns(self, count, *args, **kwargs):
+                if isinstance(count, (list, tuple)):
+                    count = len(count)
+                return [FakeColumn() for _ in range(count)]
+
+            def expander(self, label, *args, **kwargs):
+                self.events.append(f"expander:{label}")
+                return nullcontext()
+
+            def button(self, *args, **kwargs):
+                return False
+
+            def info(self, label, *args, **kwargs):
+                self.events.append(f"info:{label}")
+
+            def warning(self, label, *args, **kwargs):
+                self.events.append(f"warning:{label}")
+
+            def text_area(self, label, *args, **kwargs):
+                self.events.append(f"text_area:{label}")
+                if "value" in kwargs:
+                    return kwargs["value"]
+                key = kwargs.get("key")
+                if key is not None:
+                    return self.session_state.get(key, "")
+                return ""
+
+            def code(self, *args, **kwargs):
+                self.events.append("code")
+
+            def subheader(self, label, *args, **kwargs):
+                self.events.append(f"subheader:{label}")
+
+            def write(self, label, *args, **kwargs):
+                self.events.append(f"write:{label}")
+
+            def dataframe(self, *args, **kwargs):
+                self.events.append("dataframe")
+
+        fake_st = FakeStreamlit()
+
+        class FakeStoryBibleStore:
+            story_bible_path = Path("/tmp/story_bible.json")
+
+        class FakeCanonStore:
+            current_state_path = Path("/tmp/canon.json")
+
+            def load_current_state(self):
+                return {"people": {}, "resources": {}, "hooks": [], "timeline": []}
+
+        class FakeReleasePolicyStore:
+            policy_path = Path("/tmp/release_policy.json")
+
+            def load(self):
+                return {"global": {}, "platforms": {}}
+
+        class FakeContext:
+            def __init__(self):
+                self.story_bible_store = FakeStoryBibleStore()
+                self.canon_store = FakeCanonStore()
+                self.release_policy_store = FakeReleasePolicyStore()
+                self.project_name = "demo"
+
+            def get_workspace_settings(self):
+                return {
+                    "worldview": "",
+                    "tone_and_manner": "concise style",
+                    "continuity": "fixed rule",
+                    "state": "tense state",
+                    "summary_of_previous": "",
+                }
+
+        fake_generator = types.SimpleNamespace(
+            ctx=FakeContext(),
+            chapters_dir=Path("/tmp"),
+            elaborate_worldview=lambda text: text,
+            compress_worldview=lambda text: text,
+            structure_style_guide=lambda text: text,
+            structure_continuity=lambda text: text,
+            summarize_state=lambda text: text,
+            build_summary_update_preview=lambda text: text,
+        )
+        fake_app = types.SimpleNamespace(generator=fake_generator)
+
+        with (
+            patch.object(sys.modules["ui.workspace"], "st", fake_st),
+            patch.object(sys.modules["ui.workspace"], "render_project_text_field", side_effect=lambda *args, **kwargs: fake_st.events.append(f"field:{args[2].spec.config_key}") or args[1].get(args[2].spec.config_key, "")),
+            patch.object(sys.modules["ui.workspace"], "render_structured_store_overview", side_effect=lambda *args, **kwargs: fake_st.events.append("structured_store")),
+            patch.object(sys.modules["ui.workspace"], "render_character_management_panel", side_effect=lambda *args, **kwargs: fake_st.events.append("characters")),
+            patch.object(sys.modules["ui.workspace"], "render_diagnostics_panel", side_effect=lambda *args, **kwargs: fake_st.events.append("diagnostics")),
+            patch.object(sys.modules["ui.workspace"], "find_latest_sample_chapter", return_value=None),
+        ):
+            sys.modules["ui.workspace"].render_project_settings_tab(
+                fake_app,
+                ensure_api_key=lambda: False,
+                run_with_status=lambda *args, **kwargs: None,
+            )
+
+        metric_index = next(index for index, event in enumerate(fake_st.events) if event.startswith("metric:핵심 문서 준비도"))
+        field_index = next(index for index, event in enumerate(fake_st.events) if event == "field:worldview")
+        self.assertLess(metric_index, field_index)
+        self.assertIn("structured_store", fake_st.events)
+        self.assertIn("characters", fake_st.events)
+        self.assertIn("diagnostics", fake_st.events)
 
 
 if __name__ == "__main__":

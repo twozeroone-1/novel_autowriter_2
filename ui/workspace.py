@@ -79,6 +79,18 @@ class ReleasePolicySummary:
     enabled_platforms: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class ProjectSettingsStatusSnapshot:
+    filled_count: int
+    attention_count: int
+    total_config_chars: int
+    previous_summary_status: str
+    previous_summary_label: str
+    structured_store_label: str
+    warnings: tuple[str, ...]
+    recommended_actions: tuple[str, ...]
+
+
 BACKEND_MODE_OPTIONS = {
     "auto": "자동 (CLI 우선, 실패 시 API)",
     "api": "Gemini API만 사용",
@@ -239,6 +251,72 @@ def build_release_policy_summary(policy: dict[str, Any]) -> ReleasePolicySummary
         burst_allowed=bool(global_policy.get("burst_allowed", False)),
         cooldown_failures=int(global_policy.get("cooldown_failures", 0) or 0),
         enabled_platforms=enabled_platforms,
+    )
+
+
+def _normalize_project_section_title(section_title: str) -> str:
+    normalized = re.sub(r"^\d+\.\s*", "", str(section_title or "")).strip()
+    return normalized or "문서"
+
+
+def _build_previous_summary_status(saved_summary_text: str, editor_summary_text: str) -> tuple[str, str]:
+    saved_text = str(saved_summary_text or "").strip()
+    editor_text = str(editor_summary_text or "").strip()
+
+    if not saved_text and not editor_text:
+        return "empty", "비어 있음"
+    if editor_text != saved_text:
+        return "editing", "편집 중"
+    return "saved", "저장됨"
+
+
+def build_project_settings_status_snapshot(
+    panels: tuple[Any, ...],
+    *,
+    saved_summary_text: str,
+    editor_summary_text: str,
+    canon_summary: CanonStoreSummary,
+    release_summary: ReleasePolicySummary,
+) -> ProjectSettingsStatusSnapshot:
+    filled_count = sum(1 for panel in panels if int(getattr(panel, "char_count", 0) or 0) > 0)
+    attention_count = sum(1 for panel in panels if getattr(panel, "status", "") != "적정")
+    total_config_chars = sum(int(getattr(panel, "char_count", 0) or 0) for panel in panels)
+    previous_summary_status, previous_summary_label = _build_previous_summary_status(
+        saved_summary_text,
+        editor_summary_text,
+    )
+
+    warnings: list[str] = []
+    recommended_actions: list[str] = []
+    for panel in panels:
+        section_title = _normalize_project_section_title(getattr(getattr(panel, "spec", None), "section_title", ""))
+        char_count = int(getattr(panel, "char_count", 0) or 0)
+        status = str(getattr(panel, "status", "") or "")
+        if char_count <= 0:
+            warnings.append(f"{section_title}이 비어 있습니다.")
+            recommended_actions.append(f"{section_title} 초안을 먼저 작성하세요.")
+            continue
+        if status != "적정":
+            warnings.append(f"{section_title} 길이를 조정해야 합니다.")
+            recommended_actions.append(f"{section_title}를 AI 보조 버튼으로 압축하거나 정리하세요.")
+
+    if previous_summary_status == "empty":
+        warnings.append("PREVIOUS SUMMARY가 비어 있습니다.")
+        recommended_actions.append("PREVIOUS SUMMARY 제안 생성을 사용해 최근 줄거리 기준선을 채우세요.")
+
+    structured_store_label = (
+        f"Canon {canon_summary.people_count} / 플랫폼 {len(release_summary.enabled_platforms)}"
+    )
+
+    return ProjectSettingsStatusSnapshot(
+        filled_count=filled_count,
+        attention_count=attention_count,
+        total_config_chars=total_config_chars,
+        previous_summary_status=previous_summary_status,
+        previous_summary_label=previous_summary_label,
+        structured_store_label=structured_store_label,
+        warnings=tuple(warnings),
+        recommended_actions=tuple(recommended_actions),
     )
 
 
@@ -796,67 +874,6 @@ def render_project_settings_tab(
         st.success(pending_project_notice)
 
     config = generator.ctx.get_workspace_settings()
-    field_stats = get_field_stats(config)
-    budget_recommendations = get_budget_recommendations(config)
-
-    with st.expander("길이 가이드와 압축 팁", expanded=False):
-        total_config_chars = sum(row["chars"] for row in field_stats)
-        st.metric("설정 문서 총 글자 수", f"{total_config_chars:,}자")
-        st.dataframe(
-            [
-                {
-                    "문서": row["label"],
-                    "현재 글자 수": row["chars"],
-                    "권장 최대": row["recommended_max_chars"],
-                    "상태": row["status"],
-                }
-                for row in field_stats
-            ],
-            use_container_width=True,
-            hide_index=True,
-        )
-        for recommendation in budget_recommendations:
-            st.write(f"- {recommendation}")
-
-    specs = build_project_field_specs(generator)
-    panels = build_project_field_panels(specs, field_stats, config)
-    filled_count = sum(1 for panel in panels if panel.char_count > 0)
-    attention_count = sum(1 for panel in panels if panel.status != "적정")
-    total_config_chars = sum(panel.char_count for panel in panels)
-
-    overview_col, attention_col, total_col = st.columns(3)
-    with overview_col:
-        st.metric("작성 완료", f"{filled_count}/4")
-    with attention_col:
-        st.metric("확인 필요", f"{attention_count}개")
-    with total_col:
-        st.metric("핵심 설정 글자 수", f"{total_config_chars:,}자")
-
-    if attention_count:
-        st.caption("비어 있거나 길이 조정이 필요한 문서는 자동으로 먼저 펼쳐집니다.")
-    else:
-        st.caption("모든 핵심 문서가 권장 길이 안에 있습니다. 필요한 문서만 펼쳐서 수정하면 됩니다.")
-
-    field_values: dict[str, str] = {}
-    for panel in panels:
-        field_values[panel.spec.config_key] = render_project_text_field(
-            generator,
-            config,
-            panel,
-            ensure_api_key=ensure_api_key,
-            run_with_status=run_with_status,
-        )
-
-    st.divider()
-    save_col, info_col = st.columns([1, 4])
-    with save_col:
-        if st.button("4개 문서 저장", type="primary", use_container_width=True):
-            persist_workspace_settings(generator.ctx, field_values)
-            st.success("프로젝트 설정을 저장했습니다.")
-    with info_col:
-        st.info("필요한 문서만 저장해도 되지만, 네 문서를 같이 정리하면 생성 품질이 더 안정적입니다.")
-
-    st.divider()
     summary_value = config.get("summary_of_previous", "")
     summary_text_key = "workspace_summary_text"
     summary_source_key = "workspace_summary_source_text"
@@ -865,11 +882,104 @@ def render_project_settings_tab(
     if summary_source_key not in st.session_state:
         st.session_state[summary_source_key] = ""
 
+    field_stats = get_field_stats(config)
+    budget_recommendations = get_budget_recommendations(config)
+
+    specs = build_project_field_specs(generator)
+    panels = build_project_field_panels(specs, field_stats, config)
+    canon_summary = build_canon_store_summary(generator.ctx.canon_store.load_current_state())
+    release_summary = build_release_policy_summary(generator.ctx.release_policy_store.load())
+    status_snapshot = build_project_settings_status_snapshot(
+        panels,
+        saved_summary_text=summary_value,
+        editor_summary_text=str(st.session_state.get(summary_text_key, summary_value)),
+        canon_summary=canon_summary,
+        release_summary=release_summary,
+    )
+
+    overview_col, attention_col, summary_col, structured_col = st.columns(4)
+    with overview_col:
+        st.metric("핵심 문서 준비도", f"{status_snapshot.filled_count}/4")
+    with attention_col:
+        st.metric("확인 필요", f"{status_snapshot.attention_count}개")
+    with summary_col:
+        st.metric("PREVIOUS SUMMARY", status_snapshot.previous_summary_label)
+    with structured_col:
+        st.metric("구조화 저장소", status_snapshot.structured_store_label)
+
+    st.caption(f"핵심 설정 총 글자 수: {status_snapshot.total_config_chars:,}자")
+    if status_snapshot.attention_count:
+        st.caption("비어 있거나 길이 조정이 필요한 문서는 아래 고급 편집에서 우선 확인하세요.")
+    else:
+        st.caption("핵심 네 문서가 모두 채워져 있습니다. 필요할 때만 고급 편집을 열어 수정하면 됩니다.")
+
+    st.divider()
+    st.subheader("주요 경고 / 다음 작업")
+    warning_col, action_col = st.columns(2)
+    with warning_col:
+        st.markdown("### 주요 경고")
+        if status_snapshot.warnings:
+            for warning_text in status_snapshot.warnings:
+                st.write(f"- {warning_text}")
+        else:
+            st.info("현재 눈에 띄는 설정 경고는 없습니다.")
+    with action_col:
+        st.markdown("### 다음 권장 작업")
+        if status_snapshot.recommended_actions:
+            for action_text in status_snapshot.recommended_actions:
+                st.write(f"- {action_text}")
+        else:
+            st.info("핵심 문서 기준선이 안정적입니다. 필요한 경우만 세부 편집으로 내려가세요.")
+
+    st.divider()
+    with st.expander("1. 고급 편집", expanded=status_snapshot.attention_count > 0 or status_snapshot.filled_count < 4):
+        with st.expander("길이 가이드와 압축 팁", expanded=False):
+            total_config_chars = sum(row["chars"] for row in field_stats)
+            st.metric("설정 문서 총 글자 수", f"{total_config_chars:,}자")
+            st.dataframe(
+                [
+                    {
+                        "문서": row["label"],
+                        "현재 글자 수": row["chars"],
+                        "권장 최대": row["recommended_max_chars"],
+                        "상태": row["status"],
+                    }
+                    for row in field_stats
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+            for recommendation in budget_recommendations:
+                st.write(f"- {recommendation}")
+
+        field_values: dict[str, str] = {}
+        for panel in panels:
+            field_values[panel.spec.config_key] = render_project_text_field(
+                generator,
+                config,
+                panel,
+                ensure_api_key=ensure_api_key,
+                run_with_status=run_with_status,
+            )
+
+        st.divider()
+        save_col, info_col = st.columns([1, 4])
+        with save_col:
+            if st.button("4개 문서 저장", type="primary", use_container_width=True):
+                persist_workspace_settings(generator.ctx, field_values)
+                st.success("프로젝트 설정을 저장했습니다.")
+        with info_col:
+            st.info("필요한 문서만 저장해도 되지만, 네 문서를 같이 정리하면 생성 품질이 더 안정적입니다.")
+
+    st.divider()
     current_summary_text = str(st.session_state.get(summary_text_key, ""))
     summary_chars = len(current_summary_text)
     summary_preview = summarize_text_preview(current_summary_text, max_chars=120, empty_fallback="아직 요약이 없습니다.")
     latest_chapter_path = find_latest_sample_chapter(generator.chapters_dir)
-    with st.expander(f"PREVIOUS SUMMARY · {summary_chars:,}자", expanded=summary_chars == 0):
+    with st.expander(
+        f"PREVIOUS SUMMARY · {summary_chars:,}자 · {status_snapshot.previous_summary_label}",
+        expanded=summary_chars == 0,
+    ):
         st.caption("이전 줄거리 요약 · 권장 400~1200자")
         st.caption(f"현재 요약: {summary_preview}")
         st.markdown("AI 제안은 입력창만 채우고, 저장 버튼을 눌렀을 때만 실제 config에 반영됩니다.")
