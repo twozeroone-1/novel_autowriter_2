@@ -41,22 +41,6 @@ class TestAutomationUi(unittest.TestCase):
         sys.modules.pop("ui.automation", None)
         return importlib.import_module("ui.automation")
 
-    def test_get_context_update_defaults_disable_legacy_auto_updates_when_missing(self):
-        module = self._load_module()
-
-        defaults = module.get_context_update_defaults({})
-
-        self.assertFalse(defaults["state"])
-        self.assertFalse(defaults["summary"])
-
-    def test_format_context_update_policy_mentions_canon_recording_when_legacy_is_disabled(self):
-        module = self._load_module()
-
-        text = module.format_context_update_policy({"state": False, "summary": False})
-
-        self.assertIn("레거시", text)
-        self.assertIn("Canon", text)
-        self.assertIn("자동 반영", text)
 
     def test_format_schedule_summary_for_weekly_rule(self):
         module = self._load_module()

@@ -24,24 +24,7 @@ WEEKDAY_LABELS = {
 WEEKDAY_OPTIONS = tuple(WEEKDAY_LABELS.keys())
 
 
-def get_context_update_defaults(config: dict) -> dict[str, bool]:
-    context_updates = config.get("context_updates", {})
-    return {
-        "state": bool(context_updates.get("state", False)),
-        "summary": bool(context_updates.get("summary", False)),
-    }
 
-
-def format_context_update_policy(context_updates: dict[str, bool]) -> str:
-    if not context_updates.get("state") and not context_updates.get("summary"):
-        return "기본값은 레거시 STATE/PREVIOUS SUMMARY 자동 반영을 끄고, Canon 후보만 실행 기록에 남깁니다."
-
-    enabled_labels: list[str] = []
-    if context_updates.get("state"):
-        enabled_labels.append("STATE")
-    if context_updates.get("summary"):
-        enabled_labels.append("PREVIOUS SUMMARY")
-    return f"레거시 자동 반영 대상: {', '.join(enabled_labels)} / Canon 후보 기록은 계속 유지됩니다."
 
 
 def build_schedule_editor_state(schedule_type: str) -> dict[str, bool]:
@@ -316,9 +299,6 @@ def render_automation_tab(app) -> None:
     default_time = _parse_time_value(schedule.get("time", "21:00"))
     default_days = [day for day in schedule.get("days", []) if day in WEEKDAY_OPTIONS]
     default_hours = int(schedule.get("hours", 24))
-    context_update_defaults = get_context_update_defaults(config)
-    default_auto_state = context_update_defaults["state"]
-    default_auto_summary = context_update_defaults["summary"]
     generation_options = config.get("generation_options", {})
     default_use_plot = bool(generation_options.get("include_plot", False))
     default_plot_strength = str(generation_options.get("plot_strength", "balanced") or "balanced")
@@ -327,17 +307,6 @@ def render_automation_tab(app) -> None:
     saved_plot_outline = app.generator.ctx.get_plot_outline()
 
     enabled = st.checkbox("자동화 활성화", value=config.get("enabled", False), key="automation_enabled")
-    auto_update_state = st.checkbox(
-        "회차 완료 후 레거시 STATE 자동 갱신",
-        value=default_auto_state,
-        key="automation_auto_update_state",
-    )
-    auto_update_summary = st.checkbox(
-        "회차 완료 후 레거시 PREVIOUS SUMMARY 자동 갱신",
-        value=default_auto_summary,
-        key="automation_auto_update_summary",
-    )
-    st.caption(format_context_update_policy({"state": auto_update_state, "summary": auto_update_summary}))
 
     auto_use_plot = st.checkbox(
         "저장한 대형 플롯을 자동화 생성/검수 흐름에 반영",
@@ -405,8 +374,8 @@ def render_automation_tab(app) -> None:
         config["enabled"] = enabled
         config["schedule"] = updated_schedule
         config["context_updates"] = {
-            "state": st.session_state.get("automation_auto_update_state", default_auto_state),
-            "summary": st.session_state.get("automation_auto_update_summary", default_auto_summary),
+            "state": False,
+            "summary": False,
         }
         config["generation_options"] = {
             "include_plot": st.session_state.get("automation_use_plot", default_use_plot),

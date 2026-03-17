@@ -480,8 +480,7 @@ class TestUiHelpers(unittest.TestCase):
 
         snapshot = build_project_settings_status_snapshot(
             panels,
-            saved_summary_text="saved summary",
-            editor_summary_text="saved summary",
+
             canon_summary=build_canon_store_summary({"people": {"Hero": {}}, "resources": {}, "hooks": [], "timeline": []}),
             release_summary=build_release_policy_summary({"global": {}, "platforms": {"munpia": {"enabled": True}}}),
         )
@@ -493,36 +492,7 @@ class TestUiHelpers(unittest.TestCase):
         self.assertIn("Canon 1", snapshot.structured_store_label)
         self.assertIn("플랫폼 1", snapshot.structured_store_label)
 
-    def test_build_project_settings_status_snapshot_marks_previous_summary_states(self):
-        panels = ()
-        canon_summary = build_canon_store_summary({"people": {}, "resources": {}, "hooks": [], "timeline": []})
-        release_summary = build_release_policy_summary({"global": {}, "platforms": {}})
 
-        empty_snapshot = build_project_settings_status_snapshot(
-            panels,
-            saved_summary_text="",
-            editor_summary_text="",
-            canon_summary=canon_summary,
-            release_summary=release_summary,
-        )
-        editing_snapshot = build_project_settings_status_snapshot(
-            panels,
-            saved_summary_text="saved",
-            editor_summary_text="edited",
-            canon_summary=canon_summary,
-            release_summary=release_summary,
-        )
-        saved_snapshot = build_project_settings_status_snapshot(
-            panels,
-            saved_summary_text="saved",
-            editor_summary_text="saved",
-            canon_summary=canon_summary,
-            release_summary=release_summary,
-        )
-
-        self.assertEqual(empty_snapshot.previous_summary_status, "empty")
-        self.assertEqual(editing_snapshot.previous_summary_status, "editing")
-        self.assertEqual(saved_snapshot.previous_summary_status, "saved")
 
     def test_build_project_settings_status_snapshot_generates_warnings_and_actions(self):
         panels = (
@@ -532,18 +502,15 @@ class TestUiHelpers(unittest.TestCase):
 
         snapshot = build_project_settings_status_snapshot(
             panels,
-            saved_summary_text="",
-            editor_summary_text="",
+
             canon_summary=build_canon_store_summary({"people": {}, "resources": {}, "hooks": [], "timeline": []}),
             release_summary=build_release_policy_summary({"global": {}, "platforms": {}}),
         )
 
         self.assertIn("STORY BIBLE이 비어 있습니다.", snapshot.warnings)
         self.assertIn("STYLE GUIDE 길이를 조정해야 합니다.", snapshot.warnings)
-        self.assertIn("PREVIOUS SUMMARY가 비어 있습니다.", snapshot.warnings)
         self.assertIn("STORY BIBLE 초안을 먼저 작성하세요.", snapshot.recommended_actions)
         self.assertIn("STYLE GUIDE를 AI 보조 버튼으로 압축하거나 정리하세요.", snapshot.recommended_actions)
-        self.assertIn("PREVIOUS SUMMARY 제안 생성을 사용해 최근 줄거리 기준선을 채우세요.", snapshot.recommended_actions)
 
     def test_persist_workspace_field_routes_story_bible_updates_through_story_store(self):
         class FakeContext:
@@ -968,16 +935,14 @@ class TestUiHelpers(unittest.TestCase):
             )
 
         support_index = next(index for index, event in enumerate(fake_st.events) if event == "expander:2. 보조 관리")
-        summary_index = next(index for index, event in enumerate(fake_st.events) if event.startswith("expander:PREVIOUS SUMMARY"))
         structured_index = next(index for index, event in enumerate(fake_st.events) if event == "structured_store")
         characters_index = next(index for index, event in enumerate(fake_st.events) if event == "characters")
         diagnostics_index = next(index for index, event in enumerate(fake_st.events) if event == "diagnostics")
 
-        self.assertLess(support_index, summary_index)
         self.assertLess(support_index, structured_index)
         self.assertLess(support_index, characters_index)
         self.assertLess(support_index, diagnostics_index)
-        self.assertIn("caption:핵심 4문서 밖의 보조 기준선, 구조화 저장소, 등장인물, 진단은 필요할 때만 여세요.", fake_st.events)
+        self.assertIn("caption:핵심 문서 밖의 보조 기준선, 구조화 저장소, 등장인물, 진단은 필요할 때만 여세요.", fake_st.events)
 
 
 if __name__ == "__main__":

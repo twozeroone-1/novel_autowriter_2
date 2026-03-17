@@ -15,7 +15,7 @@ class TestContextPromptSections(unittest.TestCase):
             continuity_context="[CONTINUITY]\nrules",
             canon_context="[CANON FACTS]\n{}",
             release_policy_context="[RELEASE POLICY]\n{}",
-            state_context="[STATE]\nstate",
+
             character_context="[주요 등장인물 프로필]\n- lead",
             plot_block="[PLOT OUTLINE]\nplot",
             user_instruction="next episode",

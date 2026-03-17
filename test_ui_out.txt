@@ -1,0 +1,461 @@
+﻿python : 2026-03-17 13:04:47
+.348 WARNING streamlit.runti
+me.scriptrunner_utils.script
+_run_context: Thread 'MainTh
+read': missing ScriptRunCont
+ext! This warning can be ign
+ored when running in bare mo
+de.
+위치 줄:1 문자:1
++ python -m unittest discove
+r tests > test_ui_errors.txt
+ 2>&1
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~
+    + CategoryInfo          
+    : NotSpecified: (2026-  
+  03-17 13:0...g in bare    
+ mode.:String) [], Remot    
+eException
+    + FullyQualifiedErrorId 
+    : NativeCommandError
+ 
+............................
+..E....E....................
+............................
+...................E........
+F.............F.............
+............................
+............................
+.F..........................
+............................
+............................
+............................
+............................
+............................
+............................
+.........................EEE
+......................EE....
+..
+============================
+============================
+==============
+ERROR: test_format_context_u
+pdate_policy_mentions_canon_
+recording_when_legacy_is_dis
+abled (test_automation_ui.Te
+stAutomationUi.test_format_c
+ontext_update_policy_mention
+s_canon_recording_when_legac
+y_is_disabled)
+----------------------------
+----------------------------
+--------------
+Traceback (most recent call 
+last):
+  File "C:\Users\W\novel_aut
+owriter_2\tests\test_automat
+ion_ui.py", line 55, in test
+_format_context_update_polic
+y_mentions_canon_recording_w
+hen_legacy_is_disabled
+    text = module.format_con
+text_update_policy({"state":
+ False, "summary": False})
+           ^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^
+AttributeError: module 'ui.a
+utomation' has no attribute 
+'format_context_update_polic
+y'
+
+============================
+============================
+==============
+ERROR: test_get_context_upda
+te_defaults_disable_legacy_a
+uto_updates_when_missing (te
+st_automation_ui.TestAutomat
+ionUi.test_get_context_updat
+e_defaults_disable_legacy_au
+to_updates_when_missing)
+----------------------------
+----------------------------
+--------------
+Traceback (most recent call 
+last):
+  File "C:\Users\W\novel_aut
+owriter_2\tests\test_automat
+ion_ui.py", line 47, in test
+_get_context_update_defaults
+_disable_legacy_auto_updates
+_when_missing
+    defaults = module.get_co
+ntext_update_defaults({})
+               ^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'ui.a
+utomation' has no attribute 
+'get_context_update_defaults
+'
+
+============================
+============================
+==============
+ERROR: test_build_generation
+_prompt_includes_all_section
+s (test_context_prompt_secti
+ons.TestContextPromptSection
+s.test_build_generation_prom
+pt_includes_all_sections)
+----------------------------
+----------------------------
+--------------
+Traceback (most recent call 
+last):
+  File "C:\Users\W\novel_aut
+owriter_2\tests\test_context
+_prompt_sections.py", line 1
+3, in test_build_generation_
+prompt_includes_all_sections
+    prompt = build_generatio
+n_prompt(
+        worldview_context="[
+STORY BIBLE]\nworld",
+    ...<7 lines>...
+        length_goal=5000,
+    )
+TypeError: build_generation_
+prompt() got an unexpected k
+eyword argument 'state_conte
+xt'
+
+============================
+============================
+==============
+ERROR: test_build_project_se
+ttings_status_snapshot_count
+s_core_documents_and_attenti
+on (test_ui_helpers.TestUiHe
+lpers.test_build_project_set
+tings_status_snapshot_counts
+_core_documents_and_attentio
+n)
+----------------------------
+----------------------------
+--------------
+Traceback (most recent call 
+last):
+  File "C:\Users\W\novel_aut
+owriter_2\tests\test_ui_help
+ers.py", line 481, in test_b
+uild_project_settings_status
+_snapshot_counts_core_docume
+nts_and_attention
+    snapshot = build_project
+_settings_status_snapshot(
+        panels,
+    ...<3 lines>...
+        release_summary=buil
+d_release_policy_summary({"g
+lobal": {}, "platforms": {"m
+unpia": {"enabled": True}}})
+,
+    )
+TypeError: build_project_set
+tings_status_snapshot() got 
+an unexpected keyword argume
+nt 'saved_summary_text'
+
+============================
+============================
+==============
+ERROR: test_build_project_se
+ttings_status_snapshot_gener
+ates_warnings_and_actions (t
+est_ui_helpers.TestUiHelpers
+.test_build_project_settings
+_status_snapshot_generates_w
+arnings_and_actions)
+----------------------------
+----------------------------
+--------------
+Traceback (most recent call 
+last):
+  File "C:\Users\W\novel_aut
+owriter_2\tests\test_ui_help
+ers.py", line 533, in test_b
+uild_project_settings_status
+_snapshot_generates_warnings
+_and_actions
+    snapshot = build_project
+_settings_status_snapshot(
+        panels,
+    ...<3 lines>...
+        release_summary=buil
+d_release_policy_summary({"g
+lobal": {}, "platforms": {}}
+),
+    )
+TypeError: build_project_set
+tings_status_snapshot() got 
+an unexpected keyword argume
+nt 'saved_summary_text'
+
+============================
+============================
+==============
+ERROR: test_build_project_se
+ttings_status_snapshot_marks
+_previous_summary_states (te
+st_ui_helpers.TestUiHelpers.
+test_build_project_settings_
+status_snapshot_marks_previo
+us_summary_states)
+----------------------------
+----------------------------
+--------------
+Traceback (most recent call 
+last):
+  File "C:\Users\W\novel_aut
+owriter_2\tests\test_ui_help
+ers.py", line 501, in test_b
+uild_project_settings_status
+_snapshot_marks_previous_sum
+mary_states
+    empty_snapshot = build_p
+roject_settings_status_snaps
+hot(
+        panels,
+    ...<3 lines>...
+        release_summary=rele
+ase_summary,
+    )
+TypeError: build_project_set
+tings_status_snapshot() got 
+an unexpected keyword argume
+nt 'saved_summary_text'
+
+============================
+============================
+==============
+ERROR: test_render_project_s
+ettings_tab_groups_supportin
+g_sections_under_secondary_m
+anagement (test_ui_helpers.T
+estUiHelpers.test_render_pro
+ject_settings_tab_groups_sup
+porting_sections_under_secon
+dary_management)
+----------------------------
+----------------------------
+--------------
+Traceback (most recent call 
+last):
+  File "C:\Users\W\novel_aut
+owriter_2\tests\test_ui_help
+ers.py", line 964, in test_r
+ender_project_settings_tab_g
+roups_supporting_sections_un
+der_secondary_management
+    sys.modules["ui.workspac
+e"].render_project_settings_
+tab(
+    ~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~^
+        fake_app,
+        ^^^^^^^^^
+        ensure_api_key=lambd
+a: False,
+        ^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^
+        run_with_status=lamb
+da *args, **kwargs: None,
+        ^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\W\novel_aut
+owriter_2\ui\workspace.py", 
+line 855, in render_project_
+settings_tab
+    field_stats = get_field_
+stats(config)
+                            
+      ^^^^^^
+NameError: name 'config' is 
+not defined
+
+============================
+============================
+==============
+ERROR: test_render_project_s
+ettings_tab_renders_status_s
+ections_before_editor_sectio
+ns (test_ui_helpers.TestUiHe
+lpers.test_render_project_se
+ttings_tab_renders_status_se
+ctions_before_editor_section
+s)
+----------------------------
+----------------------------
+--------------
+Traceback (most recent call 
+last):
+  File "C:\Users\W\novel_aut
+owriter_2\tests\test_ui_help
+ers.py", line 828, in test_r
+ender_project_settings_tab_r
+enders_status_sections_befor
+e_editor_sections
+    sys.modules["ui.workspac
+e"].render_project_settings_
+tab(
+    ~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~^
+        fake_app,
+        ^^^^^^^^^
+        ensure_api_key=lambd
+a: False,
+        ^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^
+        run_with_status=lamb
+da *args, **kwargs: None,
+        ^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\W\novel_aut
+owriter_2\ui\workspace.py", 
+line 855, in render_project_
+settings_tab
+    field_stats = get_field_
+stats(config)
+                            
+      ^^^^^^
+NameError: name 'config' is 
+not defined
+
+============================
+============================
+==============
+FAIL: test_append_and_read_r
+ecent_runs_newest_first (tes
+t_diagnostics.TestDiagnostic
+sStorage.test_append_and_rea
+d_recent_runs_newest_first)
+----------------------------
+----------------------------
+--------------
+Traceback (most recent call 
+last):
+  File "C:\Users\W\novel_aut
+owriter_2\tests\test_diagnos
+tics.py", line 40, in test_a
+ppend_and_read_recent_runs_n
+ewest_first
+    self.assertEqual(len(rec
+ords), 2)
+    ~~~~~~~~~~~~~~~~^^^^^^^^
+^^^^^^^^^
+AssertionError: 1 != 2
+
+============================
+============================
+==============
+FAIL: test_create_draft_assi
+gns_episode_id_and_manifest_
+entry (test_episode_artifact
+_store.TestEpisodeArtifactSt
+ore.test_create_draft_assign
+s_episode_id_and_manifest_en
+try)
+----------------------------
+----------------------------
+--------------
+Traceback (most recent call 
+last):
+  File "C:\Users\W\novel_aut
+owriter_2\tests\test_episode
+_artifact_store.py", line 25
+, in test_create_draft_assig
+ns_episode_id_and_manifest_e
+ntry
+    self.assertEqual(
+    ~~~~~~~~~~~~~~~~^
+        manifest["episodes"]
+["ep_001"]["canon_update_pat
+h"],
+        ^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^
+        "episodes/canon_upda
+tes/ep_001.json",
+        ^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^
+    )
+    ^
+AssertionError: 'episodes\\c
+anon_updates\\ep_001.json' !
+= 'episodes/canon_updates/ep
+_001.json'
+- episodes\canon_updates\ep_
+001.json
+?         ^             ^
++ episodes/canon_updates/ep_
+001.json
+?         ^             ^
+
+
+============================
+============================
+==============
+FAIL: test_build_bootstrap_c
+ommand_points_to_script (tes
+t_munpia_session_launcher.Te
+stMunpiaSessionLauncher.test
+_build_bootstrap_command_poi
+nts_to_script)
+----------------------------
+----------------------------
+--------------
+Traceback (most recent call 
+last):
+  File "C:\Users\W\novel_aut
+owriter_2\tests\test_munpia_
+session_launcher.py", line 1
+3, in test_build_bootstrap_c
+ommand_points_to_script
+    self.assertIn('cd "/mnt/
+c/Users/W/novel_autowriter_2
+"', command)
+    ~~~~~~~~~~~~~^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^
+AssertionError: 'cd "/mnt/c/
+Users/W/novel_autowriter_2"'
+ not found in 'cd "\\mnt\\c\
+\Users\\W\\novel_autowriter_
+2" && python3 scripts/bootst
+rap_munpia_session.py 2'
+[ContextManager] Skipping invalid character at index 1
+>> [sample] 작품 생성 요청 중...
+>> [sample] 작품 생성 요청 중...
+>> [sample] 작품 생성 요청 중...
+>> [sample] 작품 생성 요청 중...
+>> [sample] 작품 생성 요청 중...
+>> 캐릭터 설정 생성 중...
+[Fallback] API Key 1/2 failed: quota exhausted
+>> Generating review report...
+>> Generating revised draft...
+
+----------------------------
+----------------------------
+--------------
+Ran 450 tests in 2.263s
+
+FAILED (failures=3, errors=8
+)

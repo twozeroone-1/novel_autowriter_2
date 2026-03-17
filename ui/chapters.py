@@ -471,36 +471,22 @@ def render_generation_tab(app: Any) -> None:
         )
 
     st.divider()
-    st.subheader("컨텍스트 제안")
-    st.caption("초안을 기준으로 다음 회차용 STATE와 누적 PREVIOUS SUMMARY 제안을 만들 수 있습니다.")
+    st.subheader("칸텍스트(Canon) 업데이트 추출")
+    st.caption("초안을 분석하여 새롭게 등장한 인물이나 변경된 설정을 추출합니다.")
 
-    if st.button("초안 기준 컨텍스트 제안 생성", key="generation_generate_context", width="stretch"):
-        context_result = run_with_status(
-            lambda: generator.build_context_suggestions(st.session_state["edited_draft"]),
-            "STATE/PREVIOUS SUMMARY 제안을 생성하는 중입니다...",
-            llm_error_prefix="컨텍스트 제안 생성 중 오류가 발생했습니다",
-            error_prefix="컨텍스트 제안 생성 중 예상치 못한 오류가 발생했습니다",
-        )
-        if context_result is not None:
-            # Also try to extract canon_update and bundle it
-            with st.spinner("구조화 CANON 업데이트 데이터를 분석 중입니다..."):
-                try:
-                    canon_update = generator.build_canon_update_candidate(st.session_state["edited_draft"])
-                    context_result["canon_update"] = canon_update
-                except Exception as exc:
-                    context_result["canon_update_error"] = str(exc)
-            
-            st.session_state["generation_context_result"] = context_result
-            st.session_state.pop("generation_context_state", None)
-            st.session_state.pop("generation_context_summary", None)
+    if st.button("초안 기준 설정/인물 변경사항 추출", key="generation_generate_context", width="stretch"):
+        context_result = {}
+        with st.spinner("구조화 CANON 업데이트 데이터를 분석 중입니다..."):
+            try:
+                canon_update = generator.build_canon_update_candidate(st.session_state["edited_draft"])
+                context_result["canon_update"] = canon_update
+            except Exception as exc:
+                context_result["canon_update_error"] = str(exc)
+        
+        st.session_state["generation_context_result"] = context_result
 
     generation_context_result = st.session_state.get("generation_context_result", {})
     if generation_context_result:
-        if generation_context_result.get("state_error"):
-            st.warning(f"STATE 제안 생성에 실패했습니다: {generation_context_result['state_error']}")
-        if generation_context_result.get("summary_error"):
-            st.warning(f"PREVIOUS SUMMARY 제안 생성에 실패했습니다: {generation_context_result['summary_error']}")
-
         current_snapshot = generator.ctx.get_workspace_settings()
             
         gen_canon_update = generation_context_result.get("canon_update")
@@ -680,36 +666,22 @@ def render_review_tab(app: Any) -> None:
 
     if "revised_draft" in st.session_state:
         st.divider()
-        st.subheader("컨텍스트 제안")
-        st.caption("수정본을 기준으로 다음 회차용 STATE와 누적 PREVIOUS SUMMARY 제안을 만들 수 있습니다.")
+        st.subheader("칸텍스트(Canon) 업데이트 추출")
+        st.caption("수정본을 분석하여 새롭게 등장한 인물이나 변경된 설정을 추출합니다.")
 
-        if st.button("수정본 기준 컨텍스트 제안 생성", key="review_generate_context", width="stretch"):
-            context_result = run_with_status(
-                lambda: generator.build_context_suggestions(st.session_state["edited_revised_draft"]),
-                "STATE/PREVIOUS SUMMARY 제안을 생성하는 중입니다...",
-                llm_error_prefix="컨텍스트 제안 생성 중 오류가 발생했습니다",
-                error_prefix="컨텍스트 제안 생성 중 예상치 못한 오류가 발생했습니다",
-            )
-            if context_result is not None:
-                # Also try to extract canon_update and bundle it
-                with st.spinner("구조화 CANON 업데이트 데이터를 분석 중입니다..."):
-                    try:
-                        canon_update = generator.build_canon_update_candidate(st.session_state["edited_revised_draft"])
-                        context_result["canon_update"] = canon_update
-                    except Exception as exc:
-                        context_result["canon_update_error"] = str(exc)
-                        
-                st.session_state["review_context_result"] = context_result
-                st.session_state.pop("review_context_state", None)
-                st.session_state.pop("review_context_summary", None)
+        if st.button("수정본 기준 설정/인물 변경사항 추출", key="review_generate_context", width="stretch"):
+            context_result = {}
+            with st.spinner("구조화 CANON 업데이트 데이터를 분석 중입니다..."):
+                try:
+                    canon_update = generator.build_canon_update_candidate(st.session_state["edited_revised_draft"])
+                    context_result["canon_update"] = canon_update
+                except Exception as exc:
+                    context_result["canon_update_error"] = str(exc)
+                    
+            st.session_state["review_context_result"] = context_result
 
         review_context_result = st.session_state.get("review_context_result", {})
         if review_context_result:
-            if review_context_result.get("state_error"):
-                st.warning(f"STATE 제안 생성에 실패했습니다: {review_context_result['state_error']}")
-            if review_context_result.get("summary_error"):
-                st.warning(f"PREVIOUS SUMMARY 제안 생성에 실패했습니다: {review_context_result['summary_error']}")
-
             current_snapshot = generator.ctx.get_workspace_settings()
 
             rev_canon_update = review_context_result.get("canon_update")

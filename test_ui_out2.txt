@@ -1,0 +1,253 @@
+﻿python : 2026-03-17 13:07:14
+.632 WARNING streamlit.runti
+me.scriptrunner_utils.script
+_run_context: Thread 'MainTh
+read': missing ScriptRunCont
+ext! This warning can be ign
+ored when running in bare mo
+de.
+위치 줄:1 문자:1
++ python -m unittest discove
+r tests > test_ui_errors2.tx
+t 2>&1; Get-Con ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~
+    + CategoryInfo          
+    : NotSpecified: (2026-  
+  03-17 13:0...g in bare    
+ mode.:String) [], Remot    
+eException
+    + FullyQualifiedErrorId 
+    : NativeCommandError
+ 
+............................
+............................
+............................
+..........................F.
+............F...............
+............................
+...........................F
+............................
+............................
+............................
+............................
+............................
+............................
+............................
+........................FF..
+....................E.......
+============================
+============================
+==============
+ERROR: test_render_project_s
+ettings_tab_groups_supportin
+g_sections_under_secondary_m
+anagement (test_ui_helpers.T
+estUiHelpers.test_render_pro
+ject_settings_tab_groups_sup
+porting_sections_under_secon
+dary_management)
+----------------------------
+----------------------------
+--------------
+Traceback (most recent call 
+last):
+  File "C:\Users\W\novel_aut
+owriter_2\tests\test_ui_help
+ers.py", line 966, in test_r
+ender_project_settings_tab_g
+roups_supporting_sections_un
+der_secondary_management
+    summary_index = next(ind
+ex for index, event in enume
+rate(fake_st.events) if even
+t.startswith("expander:PREVI
+OUS SUMMARY"))
+StopIteration
+
+============================
+============================
+==============
+FAIL: test_append_and_read_r
+ecent_runs_newest_first (tes
+t_diagnostics.TestDiagnostic
+sStorage.test_append_and_rea
+d_recent_runs_newest_first)
+----------------------------
+----------------------------
+--------------
+Traceback (most recent call 
+last):
+  File "C:\Users\W\novel_aut
+owriter_2\tests\test_diagnos
+tics.py", line 40, in test_a
+ppend_and_read_recent_runs_n
+ewest_first
+    self.assertEqual(len(rec
+ords), 2)
+    ~~~~~~~~~~~~~~~~^^^^^^^^
+^^^^^^^^^
+AssertionError: 1 != 2
+
+============================
+============================
+==============
+FAIL: test_create_draft_assi
+gns_episode_id_and_manifest_
+entry (test_episode_artifact
+_store.TestEpisodeArtifactSt
+ore.test_create_draft_assign
+s_episode_id_and_manifest_en
+try)
+----------------------------
+----------------------------
+--------------
+Traceback (most recent call 
+last):
+  File "C:\Users\W\novel_aut
+owriter_2\tests\test_episode
+_artifact_store.py", line 25
+, in test_create_draft_assig
+ns_episode_id_and_manifest_e
+ntry
+    self.assertEqual(
+    ~~~~~~~~~~~~~~~~^
+        manifest["episodes"]
+["ep_001"]["canon_update_pat
+h"],
+        ^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^
+        "episodes/canon_upda
+tes/ep_001.json",
+        ^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^
+    )
+    ^
+AssertionError: 'episodes\\c
+anon_updates\\ep_001.json' !
+= 'episodes/canon_updates/ep
+_001.json'
+- episodes\canon_updates\ep_
+001.json
+?         ^             ^
++ episodes/canon_updates/ep_
+001.json
+?         ^             ^
+
+
+============================
+============================
+==============
+FAIL: test_build_bootstrap_c
+ommand_points_to_script (tes
+t_munpia_session_launcher.Te
+stMunpiaSessionLauncher.test
+_build_bootstrap_command_poi
+nts_to_script)
+----------------------------
+----------------------------
+--------------
+Traceback (most recent call 
+last):
+  File "C:\Users\W\novel_aut
+owriter_2\tests\test_munpia_
+session_launcher.py", line 1
+3, in test_build_bootstrap_c
+ommand_points_to_script
+    self.assertIn('cd "/mnt/
+c/Users/W/novel_autowriter_2
+"', command)
+    ~~~~~~~~~~~~~^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^
+AssertionError: 'cd "/mnt/c/
+Users/W/novel_autowriter_2"'
+ not found in 'cd "\\mnt\\c\
+\Users\\W\\novel_autowriter_
+2" && python3 scripts/bootst
+rap_munpia_session.py 2'
+
+============================
+============================
+==============
+FAIL: test_build_project_set
+tings_status_snapshot_genera
+tes_warnings_and_actions (te
+st_ui_helpers.TestUiHelpers.
+test_build_project_settings_
+status_snapshot_generates_wa
+rnings_and_actions)
+----------------------------
+----------------------------
+--------------
+Traceback (most recent call 
+last):
+  File "C:\Users\W\novel_aut
+owriter_2\tests\test_ui_help
+ers.py", line 538, in test_b
+uild_project_settings_status
+_snapshot_generates_warnings
+_and_actions
+    self.assertIn("PREVIOUS 
+SUMMARY가 비어 있습니다.", snapshot
+.warnings)
+    ~~~~~~~~~~~~~^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^
+AssertionError: 'PREVIOUS SU
+MMARY가 비어 있습니다.' not found i
+n ('STORY BIBLE이 비어 있습니다.', 
+'STYLE GUIDE 길이를 조정해야 합니다.')
+
+============================
+============================
+==============
+FAIL: test_build_project_set
+tings_status_snapshot_marks_
+previous_summary_states (tes
+t_ui_helpers.TestUiHelpers.t
+est_build_project_settings_s
+tatus_snapshot_marks_previou
+s_summary_states)
+----------------------------
+----------------------------
+--------------
+Traceback (most recent call 
+last):
+  File "C:\Users\W\novel_aut
+owriter_2\tests\test_ui_help
+ers.py", line 519, in test_b
+uild_project_settings_status
+_snapshot_marks_previous_sum
+mary_states
+    self.assertEqual(empty_s
+napshot.previous_summary_sta
+tus, "empty")
+    ~~~~~~~~~~~~~~~~^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^
+AssertionError: 'saved' != '
+empty'
+- saved
++ empty
+
+
+----------------------------
+----------------------------
+--------------
+Ran 448 tests in 2.760s
+
+FAILED (failures=5, errors=1
+)
+[ContextManager] Skipping invalid character at index 1
+>> [sample] 작품 생성 요청 중...
+>> [sample] 작품 생성 요청 중...
+>> [sample] 작품 생성 요청 중...
+>> [sample] 작품 생성 요청 중...
+>> [sample] 작품 생성 요청 중...
+>> 캐릭터 설정 생성 중...
+[Fallback] API Key 1/2 failed: quota exhausted
+>> Generating review report...
+>> Generating revised draft...

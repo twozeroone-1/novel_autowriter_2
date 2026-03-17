@@ -259,32 +259,15 @@ def _normalize_project_section_title(section_title: str) -> str:
     return normalized or "문서"
 
 
-def _build_previous_summary_status(saved_summary_text: str, editor_summary_text: str) -> tuple[str, str]:
-    saved_text = str(saved_summary_text or "").strip()
-    editor_text = str(editor_summary_text or "").strip()
-
-    if not saved_text and not editor_text:
-        return "empty", "비어 있음"
-    if editor_text != saved_text:
-        return "editing", "편집 중"
-    return "saved", "저장됨"
-
-
 def build_project_settings_status_snapshot(
     panels: tuple[Any, ...],
     *,
-    saved_summary_text: str,
-    editor_summary_text: str,
     canon_summary: CanonStoreSummary,
     release_summary: ReleasePolicySummary,
 ) -> ProjectSettingsStatusSnapshot:
     filled_count = sum(1 for panel in panels if int(getattr(panel, "char_count", 0) or 0) > 0)
     attention_count = sum(1 for panel in panels if getattr(panel, "status", "") != "적정")
     total_config_chars = sum(int(getattr(panel, "char_count", 0) or 0) for panel in panels)
-    previous_summary_status, previous_summary_label = _build_previous_summary_status(
-        saved_summary_text,
-        editor_summary_text,
-    )
 
     warnings: list[str] = []
     recommended_actions: list[str] = []
@@ -300,10 +283,6 @@ def build_project_settings_status_snapshot(
             warnings.append(f"{section_title} 길이를 조정해야 합니다.")
             recommended_actions.append(f"{section_title}를 AI 보조 버튼으로 압축하거나 정리하세요.")
 
-    if previous_summary_status == "empty":
-        warnings.append("PREVIOUS SUMMARY가 비어 있습니다.")
-        recommended_actions.append("PREVIOUS SUMMARY 제안 생성을 사용해 최근 줄거리 기준선을 채우세요.")
-
     structured_store_label = (
         f"Canon {canon_summary.people_count} / 플랫폼 {len(release_summary.enabled_platforms)}"
     )
@@ -312,8 +291,8 @@ def build_project_settings_status_snapshot(
         filled_count=filled_count,
         attention_count=attention_count,
         total_config_chars=total_config_chars,
-        previous_summary_status=previous_summary_status,
-        previous_summary_label=previous_summary_label,
+        previous_summary_status="saved",
+        previous_summary_label="사용 안함",
         structured_store_label=structured_store_label,
         warnings=tuple(warnings),
         recommended_actions=tuple(recommended_actions),
@@ -874,14 +853,6 @@ def render_project_settings_tab(
         st.success(pending_project_notice)
 
     config = generator.ctx.get_workspace_settings()
-    summary_value = config.get("summary_of_previous", "")
-    summary_text_key = "workspace_summary_text"
-    summary_source_key = "workspace_summary_source_text"
-    if summary_text_key not in st.session_state:
-        st.session_state[summary_text_key] = summary_value
-    if summary_source_key not in st.session_state:
-        st.session_state[summary_source_key] = ""
-
     field_stats = get_field_stats(config)
     budget_recommendations = get_budget_recommendations(config)
 
@@ -891,19 +862,15 @@ def render_project_settings_tab(
     release_summary = build_release_policy_summary(generator.ctx.release_policy_store.load())
     status_snapshot = build_project_settings_status_snapshot(
         panels,
-        saved_summary_text=summary_value,
-        editor_summary_text=str(st.session_state.get(summary_text_key, summary_value)),
         canon_summary=canon_summary,
         release_summary=release_summary,
     )
 
-    overview_col, attention_col, summary_col, structured_col = st.columns(4)
+    overview_col, attention_col, structured_col = st.columns(3)
     with overview_col:
         st.metric("핵심 문서 준비도", f"{status_snapshot.filled_count}/4")
     with attention_col:
         st.metric("확인 필요", f"{status_snapshot.attention_count}개")
-    with summary_col:
-        st.metric("PREVIOUS SUMMARY", status_snapshot.previous_summary_label)
     with structured_col:
         st.metric("구조화 저장소", status_snapshot.structured_store_label)
 
@@ -972,70 +939,9 @@ def render_project_settings_tab(
             st.info("필요한 문서만 저장해도 되지만, 네 문서를 같이 정리하면 생성 품질이 더 안정적입니다.")
 
     st.divider()
-    current_summary_text = str(st.session_state.get(summary_text_key, ""))
-    summary_chars = len(current_summary_text)
-    summary_preview = summarize_text_preview(current_summary_text, max_chars=120, empty_fallback="아직 요약이 없습니다.")
-    latest_chapter_path = find_latest_sample_chapter(generator.chapters_dir)
-    supporting_tools_expanded = status_snapshot.previous_summary_status != "saved"
-    with st.expander("2. 보조 관리", expanded=supporting_tools_expanded):
-        st.caption("핵심 4문서 밖의 보조 기준선, 구조화 저장소, 등장인물, 진단은 필요할 때만 여세요.")
+    with st.expander("2. 보조 관리", expanded=False):
+        st.caption("핵심 문서 밖의 보조 기준선, 구조화 저장소, 등장인물, 진단은 필요할 때만 여세요.")
         st.caption("자주 쓰는 편집보다 기준선 점검과 보조 자료 관리에 가까운 영역입니다.")
-
-        with st.expander(
-            f"PREVIOUS SUMMARY · {summary_chars:,}자 · {status_snapshot.previous_summary_label}",
-            expanded=supporting_tools_expanded,
-        ):
-            st.caption("이전 줄거리 요약 · 권장 400~1200자")
-            st.caption(f"현재 요약: {summary_preview}")
-            st.markdown("AI 제안은 입력창만 채우고, 저장 버튼을 눌렀을 때만 실제 config에 반영됩니다.")
-            if latest_chapter_path:
-                st.caption(f"소스 입력이 비어 있으면 최근 저장 원고 `{latest_chapter_path.name}` 를 기준으로 제안합니다.")
-            else:
-                st.caption("소스 입력이 비어 있으면 fallback 할 최근 저장 원고가 없습니다.")
-
-            st.text_area(
-                "요약 소스 텍스트",
-                key=summary_source_key,
-                height=150,
-                help="직접 붙여넣은 텍스트를 우선 사용하고, 비어 있으면 최근 저장 원고를 대신 사용합니다.",
-            )
-
-            suggestion_col, save_col = st.columns(2)
-            with suggestion_col:
-                if st.button("AI 제안 생성", key="fill_previous_summary", width="stretch"):
-                    if ensure_api_key():
-                        source_text, source_label = resolve_summary_suggestion_source(
-                            st.session_state.get(summary_source_key, ""),
-                            latest_chapter_path,
-                        )
-                        if not source_text:
-                            st.warning("붙여넣은 텍스트가 없고, 사용할 최근 저장 원고도 찾지 못했습니다.")
-                        else:
-                            suggested_summary = run_with_status(
-                                lambda: generator.build_summary_update_preview(source_text),
-                                spinner_text="AI가 PREVIOUS SUMMARY 제안안을 생성하는 중입니다...",
-                                error_prefix="PREVIOUS SUMMARY 제안 생성 중 오류가 발생했습니다",
-                            )
-                            st.session_state[summary_text_key] = suggested_summary
-                            st.success(f"{source_label} 기준 제안안을 입력창에 채웠습니다.")
-
-            st.text_area(
-                "이전 줄거리",
-                key=summary_text_key,
-                height=150,
-            )
-            with save_col:
-                if st.button("이전 줄거리 저장", key="save_sum", width="stretch"):
-                    persist_workspace_field(
-                        generator.ctx,
-                        current_settings=config,
-                        config_key="summary_of_previous",
-                        value=st.session_state.get(summary_text_key, ""),
-                    )
-                    st.success("이전 줄거리를 저장했습니다.")
-
-            if st.session_state.get(summary_text_key, "") != summary_value:
-                st.caption("현재 내용은 편집기에만 반영된 상태입니다. 저장 버튼을 눌러야 config에 반영됩니다.")
 
         st.divider()
         render_structured_store_overview(generator)
