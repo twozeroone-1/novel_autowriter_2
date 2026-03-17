@@ -15,6 +15,7 @@ from core.token_budget import (
     get_budget_recommendations,
     get_field_stats,
 )
+from core.canon_candidate import is_empty_canon_candidate
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,17 @@ def build_chapter_context_defaults(
             str(current_snapshot.get("summary_of_previous", "")),
         ),
     }
+
+def persist_chapter_canon_update(context: Any, canon_update: dict, episode_id: str | None = None) -> None:
+    if not canon_update or is_empty_canon_candidate(canon_update):
+        return
+    state = context.canon_store.apply_state_update(canon_update)
+    if episode_id:
+        context.canon_store.write_snapshot(episode_id, state)
+    else:
+        from datetime import datetime
+        fallback_id = "manual_" + datetime.now().strftime("%Y%m%d%H%M%S")
+        context.canon_store.write_snapshot(fallback_id, state)
 
 
 def persist_chapter_context_update(
@@ -253,7 +265,7 @@ def render_generation_budget_panel(
                 }
                 for row in field_stats
             ],
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
         for recommendation in recommendations:
@@ -456,7 +468,7 @@ def render_generation_tab(app: Any) -> None:
     st.subheader("컨텍스트 제안")
     st.caption("초안을 기준으로 다음 회차용 STATE와 누적 PREVIOUS SUMMARY 제안을 만들 수 있습니다.")
 
-    if st.button("초안 기준 컨텍스트 제안 생성", key="generation_generate_context", use_container_width=True):
+    if st.button("초안 기준 컨텍스트 제안 생성", key="generation_generate_context", width="stretch"):
         context_result = run_with_status(
             lambda: generator.build_context_suggestions(st.session_state["edited_draft"]),
             "STATE/PREVIOUS SUMMARY 제안을 생성하는 중입니다...",
@@ -464,6 +476,14 @@ def render_generation_tab(app: Any) -> None:
             error_prefix="컨텍스트 제안 생성 중 예상치 못한 오류가 발생했습니다",
         )
         if context_result is not None:
+            # Also try to extract canon_update and bundle it
+            with st.spinner("구조화 CANON 업데이트 데이터를 분석 중입니다..."):
+                try:
+                    canon_update = generator.build_canon_update_candidate(st.session_state["edited_draft"])
+                    context_result["canon_update"] = canon_update
+                except Exception as exc:
+                    context_result["canon_update_error"] = str(exc)
+            
             st.session_state["generation_context_result"] = context_result
             st.session_state.pop("generation_context_state", None)
             st.session_state.pop("generation_context_summary", None)
@@ -497,14 +517,30 @@ def render_generation_tab(app: Any) -> None:
                 height=200,
                 key="generation_context_summary",
             )
+            
+        gen_canon_update = generation_context_result.get("canon_update")
+        if generation_context_result.get("canon_update_error"):
+            st.warning(f"CANON 분석 중 오류가 발생했습니다: {generation_context_result['canon_update_error']}")
+        elif gen_canon_update and not is_empty_canon_candidate(gen_canon_update):
+            with st.expander("[결과] 구조화 CANON 분석 결과 (저장 시 자동 반영)", expanded=True):
+                st.caption("다음 회차 생성 시 등장인물 및 설정 유지에 사용됩니다.")
+                import json
+                st.code(json.dumps(gen_canon_update, ensure_ascii=False, indent=2), language="json")
 
-        if st.button("프로젝트 컨텍스트에 반영", key="apply_generation_context", use_container_width=True):
+        if st.button("프로젝트 컨텍스트에 반영", key="apply_generation_context", width="stretch"):
             persist_chapter_context_update(
                 generator.ctx,
                 state=generation_state,
                 summary_of_previous=generation_summary,
             )
-            st.success("STATE와 PREVIOUS SUMMARY를 반영했습니다.")
+            
+            if gen_canon_update and not is_empty_canon_candidate(gen_canon_update):
+                persist_chapter_canon_update(
+                    generator.ctx,
+                    canon_update=gen_canon_update,
+                )
+            
+            st.success("STATE, PREVIOUS SUMMARY 그리고 CANON 업데이트를 반영했습니다.")
 
 
 def render_review_tab(app: Any) -> None:
@@ -667,7 +703,7 @@ def render_review_tab(app: Any) -> None:
         st.subheader("컨텍스트 제안")
         st.caption("수정본을 기준으로 다음 회차용 STATE와 누적 PREVIOUS SUMMARY 제안을 만들 수 있습니다.")
 
-        if st.button("수정본 기준 컨텍스트 제안 생성", key="review_generate_context", use_container_width=True):
+        if st.button("수정본 기준 컨텍스트 제안 생성", key="review_generate_context", width="stretch"):
             context_result = run_with_status(
                 lambda: generator.build_context_suggestions(st.session_state["edited_revised_draft"]),
                 "STATE/PREVIOUS SUMMARY 제안을 생성하는 중입니다...",
@@ -675,6 +711,14 @@ def render_review_tab(app: Any) -> None:
                 error_prefix="컨텍스트 제안 생성 중 예상치 못한 오류가 발생했습니다",
             )
             if context_result is not None:
+                # Also try to extract canon_update and bundle it
+                with st.spinner("구조화 CANON 업데이트 데이터를 분석 중입니다..."):
+                    try:
+                        canon_update = generator.build_canon_update_candidate(st.session_state["edited_revised_draft"])
+                        context_result["canon_update"] = canon_update
+                    except Exception as exc:
+                        context_result["canon_update_error"] = str(exc)
+                        
                 st.session_state["review_context_result"] = context_result
                 st.session_state.pop("review_context_state", None)
                 st.session_state.pop("review_context_summary", None)
@@ -709,13 +753,29 @@ def render_review_tab(app: Any) -> None:
                     key="review_context_summary",
                 )
 
-            if st.button("프로젝트 컨텍스트에 반영", key="apply_review_context", use_container_width=True):
+            rev_canon_update = review_context_result.get("canon_update")
+            if review_context_result.get("canon_update_error"):
+                st.warning(f"CANON 분석 중 오류가 발생했습니다: {review_context_result['canon_update_error']}")
+            elif rev_canon_update and not is_empty_canon_candidate(rev_canon_update):
+                with st.expander("[결과] 구조화 CANON 분석 결과 (저장 시 자동 반영)", expanded=True):
+                    st.caption("다음 회차 생성 시 등장인물 및 설정 유지에 사용됩니다.")
+                    import json
+                    st.code(json.dumps(rev_canon_update, ensure_ascii=False, indent=2), language="json")
+
+            if st.button("프로젝트 컨텍스트에 반영", key="apply_review_context", width="stretch"):
                 persist_chapter_context_update(
                     generator.ctx,
                     state=review_state,
                     summary_of_previous=review_summary,
                 )
-                st.success("STATE와 PREVIOUS SUMMARY를 반영했습니다.")
+                
+                if rev_canon_update and not is_empty_canon_candidate(rev_canon_update):
+                    persist_chapter_canon_update(
+                        generator.ctx,
+                        canon_update=rev_canon_update,
+                    )
+                
+                st.success("STATE, PREVIOUS SUMMARY 그리고 CANON 업데이트를 반영했습니다.")
 
 
 def render_auto_mode_tab(app: Any) -> None:
@@ -759,7 +819,7 @@ def render_auto_mode_tab(app: Any) -> None:
         if not saved_plot_outline:
             st.caption("저장한 플롯이 없어 플롯 반영 옵션은 비활성화되어 있습니다. [1] 프로젝트 통합 설정 > 대형 플롯에서 먼저 생성해 주세요.")
 
-        if st.button("반자동 파이프라인 실행", type="primary", use_container_width=True):
+        if st.button("반자동 파이프라인 실행", type="primary", width="stretch"):
             if not ensure_api_key():
                 pass
             elif not auto_instruction.strip():
@@ -838,13 +898,27 @@ def render_auto_mode_tab(app: Any) -> None:
                 help="자동 갱신 결과를 검토하고 필요하면 수정해 주세요.",
             )
 
+        canon_update = result.get("canon_update")
+        if canon_update and not is_empty_canon_candidate(canon_update):
+            with st.expander("[결과] 구조화 CANON 분석 결과 (저장 시 자동 반영)", expanded=True):
+                st.caption("다음 회차 생성 시 등장인물 및 설정 유지에 사용됩니다.")
+                import json
+                st.code(json.dumps(canon_update, ensure_ascii=False, indent=2), language="json")
+
         st.divider()
-        if st.button("상태 저장 후 READY로 전환", type="primary", use_container_width=True):
+        if st.button("상태 저장 후 READY로 전환", type="primary", width="stretch"):
             persist_chapter_context_update(
                 generator.ctx,
                 state=new_state,
                 summary_of_previous=new_summary,
             )
+            
+            if canon_update and not is_empty_canon_candidate(canon_update):
+                persist_chapter_canon_update(
+                    generator.ctx,
+                    canon_update=canon_update,
+                    episode_id=result.get("episode_id"),
+                )
 
             for key in ["auto_result", "auto_title", "auto_inst", "auto_len"]:
                 st.session_state.pop(key, None)
