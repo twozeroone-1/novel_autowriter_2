@@ -128,7 +128,6 @@ def build_generation_prompt(
     continuity_context: str,
     canon_context: str,
     release_policy_context: str,
-    state_context: str,
     character_context: str,
     plot_block: str,
     episode_plan_block: str = "",
@@ -136,13 +135,12 @@ def build_generation_prompt(
     length_goal: int,
 ) -> str:
     return f"""당신은 프로 웹소설 작가입니다. 다음 설정과 등장인물 정보를 바탕으로 다음 회차 본문을 작성해 주세요.
-CONTINUITY를 깨지 말고, STATE의 갈등과 감정선을 자연스럽게 이어 주세요.
+CONTINUITY를 엄격히 지켜 주세요.
 
 {worldview_context}
 {continuity_context}
 {canon_context}
 {release_policy_context}
-{state_context}
 {character_context}
 {episode_plan_block}
 {plot_block}

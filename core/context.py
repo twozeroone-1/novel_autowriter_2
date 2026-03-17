@@ -361,7 +361,6 @@ class ContextManager:
         continuity_ctx = self.get_continuity_context()
         canon_ctx = self.get_canon_context()
         release_policy_ctx = self.get_release_policy_context()
-        state_ctx = self.get_state_context()
         plot_block = self.build_plot_block(include_plot=include_plot, plot_strength=plot_strength)
         episode_plan_block = build_episode_plan_block(episode_plan)
         return build_prompt_text(
@@ -369,7 +368,6 @@ class ContextManager:
             continuity_context=continuity_ctx,
             canon_context=canon_ctx,
             release_policy_context=release_policy_ctx,
-            state_context=state_ctx,
             character_context=char_ctx,
             plot_block=plot_block,
             episode_plan_block=episode_plan_block,

@@ -316,7 +316,7 @@ def render_publishing_tab(app) -> None:
     with queue_col:
         st.caption("업로드 큐")
         if snapshot["queue_rows"]:
-            st.dataframe(snapshot["queue_rows"], use_container_width=True, hide_index=True)
+            st.dataframe(snapshot["queue_rows"], width="stretch", hide_index=True)
         else:
             st.info("대기 중인 업로드 작업이 없습니다.")
 
@@ -327,7 +327,7 @@ def render_publishing_tab(app) -> None:
             f"총 {history_summary['total']}건 / 성공 {history_summary['success']}건 / 실패 {history_summary['failure']}건"
         )
         if snapshot["history_rows"]:
-            st.dataframe(snapshot["history_rows"], use_container_width=True, hide_index=True)
+            st.dataframe(snapshot["history_rows"], width="stretch", hide_index=True)
         else:
             st.info("최근 업로드 이력이 없습니다.")
 
@@ -472,12 +472,12 @@ def _render_platform_settings(project_name: str, store: PublishingStore, config:
 
             save_clicked = st.form_submit_button(
                 "플랫폼 설정 저장",
-                use_container_width=True,
+                width="stretch",
                 key=f"publishing_{platform_name}_save",
             )
             create_clicked = st.form_submit_button(
                 "신규 작품 생성",
-                use_container_width=True,
+                width="stretch",
                 key=f"publishing_{platform_name}_create",
             )
 
@@ -534,7 +534,7 @@ def _render_platform_settings(project_name: str, store: PublishingStore, config:
             st.markdown(f"- 세션 파일: {'있음' if session_snapshot['has_saved_session'] else '없음'}")
             st.markdown(f"- 경로: `{session_snapshot['session_state_path']}`")
             st.code(session_snapshot["command"], language="bash")
-            if st.button("문피아 세션 저장 시작", use_container_width=True, key="publishing_munpia_bootstrap"):
+            if st.button("문피아 세션 저장 시작", width="stretch", key="publishing_munpia_bootstrap"):
                 ok, message = launch_bootstrap_terminal(project_name=project_name)
                 if ok:
                     st.success(message)
@@ -621,7 +621,7 @@ def _render_schedule_settings(store: PublishingStore, config: dict) -> None:
             )
         )
 
-    if st.button("업로드 스케줄 저장", type="primary", use_container_width=True, key="publishing_schedule_save"):
+    if st.button("업로드 스케줄 저장", type="primary", width="stretch", key="publishing_schedule_save"):
         config = store.load_config()
         config["enabled"] = enabled
         config["browser"] = {"headless": headless}
@@ -691,7 +691,7 @@ def _render_queue_editor(app, store: PublishingStore, config: dict, queue: list[
         add_clicked = st.form_submit_button(
             "업로드 큐에 추가",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             key="publishing_queue_add",
         )
 
@@ -743,7 +743,7 @@ def _render_queue_editor(app, store: PublishingStore, config: dict, queue: list[
 
     queue_rows = build_publishing_queue_rows(queue)
     if queue_rows:
-        st.dataframe(queue_rows, use_container_width=True, hide_index=True)
+        st.dataframe(queue_rows, width="stretch", hide_index=True)
         selected_job_id = st.selectbox(
             "업로드 작업 선택",
             options=[job.get("id", "") for job in queue],
@@ -752,22 +752,22 @@ def _render_queue_editor(app, store: PublishingStore, config: dict, queue: list[
         )
         action_col1, action_col2, action_col3, action_col4 = st.columns(4)
         with action_col1:
-            if st.button("위로 이동", use_container_width=True, key="publishing_queue_move_up"):
+            if st.button("위로 이동", width="stretch", key="publishing_queue_move_up"):
                 _move_job(queue, selected_job_id, direction=-1)
                 store.save_queue(queue)
                 st.rerun()
         with action_col2:
-            if st.button("아래로 이동", use_container_width=True, key="publishing_queue_move_down"):
+            if st.button("아래로 이동", width="stretch", key="publishing_queue_move_down"):
                 _move_job(queue, selected_job_id, direction=1)
                 store.save_queue(queue)
                 st.rerun()
         with action_col3:
-            if st.button("재시도 상태로 초기화", use_container_width=True, key="publishing_queue_reset"):
+            if st.button("재시도 상태로 초기화", width="stretch", key="publishing_queue_reset"):
                 _reset_job(queue, selected_job_id)
                 store.save_queue(queue)
                 st.rerun()
         with action_col4:
-            if st.button("큐에서 제거", use_container_width=True, key="publishing_queue_remove"):
+            if st.button("큐에서 제거", width="stretch", key="publishing_queue_remove"):
                 updated_queue = [job for job in queue if job.get("id") != selected_job_id]
                 store.save_queue(updated_queue)
                 st.rerun()
@@ -786,7 +786,7 @@ def _render_runtime_and_history(project_name: str, store: PublishingStore, runti
 
     action_col1, action_col2 = st.columns(2)
     with action_col1:
-        if st.button("지금 바로 1회 실행", use_container_width=True, key="publishing_run_once"):
+        if st.button("지금 바로 1회 실행", width="stretch", key="publishing_run_once"):
             runtime_runner = PublishingRuntime(
                 store=store,
                 executor=PublishingExecutor(project_name=project_name),
@@ -795,7 +795,7 @@ def _render_runtime_and_history(project_name: str, store: PublishingStore, runti
             st.success("업로드 작업을 1회 실행했습니다.")
             st.rerun()
     with action_col2:
-        if st.button("런타임 초기화", use_container_width=True, key="publishing_resume"):
+        if st.button("런타임 초기화", width="stretch", key="publishing_resume"):
             store.save_runtime(
                 {
                     "status": "idle",
@@ -818,7 +818,7 @@ def _render_runtime_and_history(project_name: str, store: PublishingStore, runti
 
     history_rows = build_publishing_history_rows(history)
     if history_rows:
-        st.dataframe(history_rows, use_container_width=True, hide_index=True)
+        st.dataframe(history_rows, width="stretch", hide_index=True)
     else:
         st.info("최근 업로드 실행 이력이 없습니다.")
 

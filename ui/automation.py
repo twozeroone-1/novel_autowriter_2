@@ -292,7 +292,7 @@ def render_automation_tab(app) -> None:
     with preview_col1:
         st.caption("작업 큐")
         if operations_snapshot["queue_rows"]:
-            st.dataframe(operations_snapshot["queue_rows"], use_container_width=True, hide_index=True)
+            st.dataframe(operations_snapshot["queue_rows"], width="stretch", hide_index=True)
         else:
             st.info("대기 중인 자동화 작업이 없습니다.")
     with preview_col2:
@@ -302,7 +302,7 @@ def render_automation_tab(app) -> None:
             f"총 {history_summary['total']}건 / 성공 {history_summary['success']}건 / 실패 {history_summary['failure']}건"
         )
         if operations_snapshot["history_rows"]:
-            st.dataframe(operations_snapshot["history_rows"], use_container_width=True, hide_index=True)
+            st.dataframe(operations_snapshot["history_rows"], width="stretch", hide_index=True)
         else:
             st.info("최근 24시간 실행 이력이 없습니다.")
 
@@ -395,7 +395,7 @@ def render_automation_tab(app) -> None:
             )
         )
 
-    if st.button("스케줄 저장", type="primary", use_container_width=True):
+    if st.button("스케줄 저장", type="primary", width="stretch"):
         updated_schedule = {
             "type": selected_type,
             "time": selected_time.strftime("%H:%M"),
@@ -431,7 +431,7 @@ def render_automation_tab(app) -> None:
                 key="automation_job_target_length",
             )
         )
-        if st.form_submit_button("큐에 추가", type="primary", use_container_width=True):
+        if st.form_submit_button("큐에 추가", type="primary", width="stretch"):
             if not job_title.strip() or not job_instruction.strip():
                 st.warning("회차 제목과 지시사항을 모두 입력해 주세요.")
             else:
@@ -453,7 +453,7 @@ def render_automation_tab(app) -> None:
 
     queue_rows = build_queue_rows(queue)
     if queue_rows:
-        st.dataframe(queue_rows, use_container_width=True, hide_index=True)
+        st.dataframe(queue_rows, width="stretch", hide_index=True)
         selected_job_id = st.selectbox(
             "작업 선택",
             options=[job.get("id", "") for job in queue],
@@ -462,22 +462,22 @@ def render_automation_tab(app) -> None:
         )
         action_col1, action_col2, action_col3, action_col4 = st.columns(4)
         with action_col1:
-            if st.button("위로 이동", use_container_width=True):
+            if st.button("위로 이동", width="stretch"):
                 _move_job(queue, selected_job_id, direction=-1)
                 store.save_queue(queue)
                 st.rerun()
         with action_col2:
-            if st.button("아래로 이동", use_container_width=True):
+            if st.button("아래로 이동", width="stretch"):
                 _move_job(queue, selected_job_id, direction=1)
                 store.save_queue(queue)
                 st.rerun()
         with action_col3:
-            if st.button("재시도 가능 상태로 초기화", use_container_width=True):
+            if st.button("재시도 가능 상태로 초기화", width="stretch"):
                 _reset_job(queue, selected_job_id)
                 store.save_queue(queue)
                 st.rerun()
         with action_col4:
-            if st.button("큐에서 제거", use_container_width=True):
+            if st.button("큐에서 제거", width="stretch"):
                 updated_queue = [job for job in queue if job.get("id") != selected_job_id]
                 store.save_queue(updated_queue)
                 st.rerun()
@@ -496,7 +496,7 @@ def render_automation_tab(app) -> None:
 
     runtime_action_col1, runtime_action_col2 = st.columns(2)
     with runtime_action_col1:
-        if st.button("지금 한 번 체크 실행", use_container_width=True):
+        if st.button("지금 한 번 체크 실행", width="stretch"):
             runtime_runner = AutomationRuntime(
                 store=store,
                 automator=Automator(project_name=app.generator.ctx.project_name),
@@ -505,7 +505,7 @@ def render_automation_tab(app) -> None:
             st.success("자동화 체크를 한 번 실행했습니다.")
             st.rerun()
     with runtime_action_col2:
-        if st.button("paused 해제", use_container_width=True):
+        if st.button("paused 해제", width="stretch"):
             store.save_runtime(
                 {
                     "status": "idle",
@@ -530,7 +530,7 @@ def render_automation_tab(app) -> None:
 
     history_rows = build_history_rows(history)
     if history_rows:
-        st.dataframe(history_rows, use_container_width=True, hide_index=True)
+        st.dataframe(history_rows, width="stretch", hide_index=True)
     else:
         st.info("최근 24시간 실행 이력이 없습니다.")
 

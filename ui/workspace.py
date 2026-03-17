@@ -435,7 +435,7 @@ def maybe_apply_text_assist(
     ensure_api_key: Callable[[], bool],
     run_with_status: Callable[..., Any],
 ) -> None:
-    if not st.button(action.label, key=action.button_key, use_container_width=True):
+    if not st.button(action.label, key=action.button_key, width="stretch"):
         return
     if not source_text.strip():
         st.warning(action.empty_warning)
@@ -514,7 +514,7 @@ def render_project_text_field(
                 height=120,
                 help="직접 붙여넣은 텍스트를 우선 사용하고, 비어 있으면 최근 저장 원고를 대신 사용합니다.",
             )
-            if st.button("AI 제안으로 STATE 채우기", key="fill_state_from_source", use_container_width=True):
+            if st.button("AI 제안으로 STATE 채우기", key="fill_state_from_source", width="stretch"):
                 if ensure_api_key():
                     source_text, source_label = resolve_summary_suggestion_source(
                         st.session_state.get(source_key, ""),
@@ -542,7 +542,7 @@ def render_character_management_panel(generator: Generator, config: dict) -> Non
         st.markdown("### 1. AI로 주요 등장인물 추출")
         st.info("STORY BIBLE, CONTINUITY, STATE, 이전 줄거리 요약을 바탕으로 주요 캐릭터를 자동 추출합니다.")
 
-        if st.button("설정 문서 기반으로 등장인물 자동 추출", type="primary", use_container_width=True):
+        if st.button("설정 문서 기반으로 등장인물 자동 추출", type="primary", width="stretch"):
             has_source = any(
                 config.get(field, "").strip()
                 for field in ("worldview", "continuity", "state", "summary_of_previous")
@@ -639,7 +639,7 @@ def render_sidebar(
             placeholder="예: 회귀 아카데미 판타지",
             help="공백을 써도 됩니다. 연속된 공백은 하나로 정리됩니다.",
         )
-        if st.button("새 작품 추가", use_container_width=True):
+        if st.button("새 작품 추가", width="stretch"):
             project_name, project_name_error = normalize_project_name(new_project_name)
             if project_name_error:
                 st.error(project_name_error)
@@ -686,7 +686,7 @@ def render_sidebar(
                 placeholder=current_project_name,
             )
             delete_disabled = delete_confirmation.strip() != current_project_name
-            if st.button("작품 삭제", type="primary", use_container_width=True, disabled=delete_disabled):
+            if st.button("작품 삭제", type="primary", width="stretch", disabled=delete_disabled):
                 target_dir = DATA_PROJECTS_DIR / current_project_name
                 try:
                     shutil.rmtree(target_dir)
@@ -753,14 +753,14 @@ def render_sidebar(
             )
             runtime_col, secure_col = st.columns(2)
             with runtime_col:
-                if st.button("이번 실행에만 적용", use_container_width=True):
+                if st.button("이번 실행에만 적용", width="stretch"):
                     if new_api_key.strip():
                         set_runtime_api_key(new_api_key.strip())
                         st.success("API 키를 현재 실행에만 적용했습니다. 앱을 재시작하면 사라집니다.")
                         st.rerun()
             with secure_col:
                 secure_button_disabled = not secure_storage_available
-                if st.button("보안 저장소에 저장", use_container_width=True, disabled=secure_button_disabled):
+                if st.button("보안 저장소에 저장", width="stretch", disabled=secure_button_disabled):
                     ok, message = save_api_key_to_secure_storage(new_api_key.strip())
                     if ok:
                         load_dotenv(override=True)
@@ -773,7 +773,7 @@ def render_sidebar(
                 st.info("보안 저장소를 사용하려면 `keyring`이 필요합니다. 현재는 평문 저장 없이 런타임 적용만 가능합니다.")
 
             if secure_api_key_exists:
-                if st.button("보안 저장소의 API 키 삭제", use_container_width=True):
+                if st.button("보안 저장소의 API 키 삭제", width="stretch"):
                     ok, message = delete_api_key_from_secure_storage()
                     if ok:
                         st.success(message)
@@ -783,7 +783,7 @@ def render_sidebar(
 
             with st.expander("고급: 평문 `.env` 저장", expanded=False):
                 st.warning("이 옵션은 API 키를 프로젝트의 `.env` 파일에 평문으로 저장합니다.")
-                if st.button("그래도 `.env`에 저장", use_container_width=True):
+                if st.button("그래도 `.env`에 저장", width="stretch"):
                     if new_api_key.strip():
                         set_env_variable("GOOGLE_API_KEY", new_api_key.strip())
                         load_dotenv(override=True)
@@ -824,7 +824,7 @@ def render_sidebar(
             if cli_status.message:
                 st.caption(cli_status.message)
 
-            if st.button("CLI 연결 테스트", use_container_width=True):
+            if st.button("CLI 연결 테스트", width="stretch"):
                 with st.spinner("Gemini CLI 연결을 확인하는 중입니다..."):
                     tested_status = test_gemini_cli_connection(selected_model, executable_path=cli_status.path)
                 st.session_state["gemini_cli_status"] = tested_status
@@ -841,7 +841,7 @@ def render_sidebar(
             st.link_button(
                 "토큰 사용량 보기",
                 "https://aistudio.google.com/app/usage?timeRange=last-28-days",
-                use_container_width=True,
+                width="stretch",
             )
 
     return st.session_state["current_project"]
@@ -946,7 +946,7 @@ def render_project_settings_tab(
                     }
                     for row in field_stats
                 ],
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
             for recommendation in budget_recommendations:
@@ -965,7 +965,7 @@ def render_project_settings_tab(
         st.divider()
         save_col, info_col = st.columns([1, 4])
         with save_col:
-            if st.button("4개 문서 저장", type="primary", use_container_width=True):
+            if st.button("4개 문서 저장", type="primary", width="stretch"):
                 persist_workspace_settings(generator.ctx, field_values)
                 st.success("프로젝트 설정을 저장했습니다.")
         with info_col:
@@ -1002,7 +1002,7 @@ def render_project_settings_tab(
 
             suggestion_col, save_col = st.columns(2)
             with suggestion_col:
-                if st.button("AI 제안 생성", key="fill_previous_summary", use_container_width=True):
+                if st.button("AI 제안 생성", key="fill_previous_summary", width="stretch"):
                     if ensure_api_key():
                         source_text, source_label = resolve_summary_suggestion_source(
                             st.session_state.get(summary_source_key, ""),
@@ -1025,7 +1025,7 @@ def render_project_settings_tab(
                 height=150,
             )
             with save_col:
-                if st.button("이전 줄거리 저장", key="save_sum", use_container_width=True):
+                if st.button("이전 줄거리 저장", key="save_sum", width="stretch"):
                     persist_workspace_field(
                         generator.ctx,
                         current_settings=config,

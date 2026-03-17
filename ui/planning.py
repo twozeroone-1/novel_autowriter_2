@@ -36,7 +36,7 @@ def render_idea_tab(
         key="idea_tone",
     )
 
-    if st.button("아이디어/제목 생성", type="primary", use_container_width=True, key="btn_idea_gen"):
+    if st.button("아이디어/제목 생성", type="primary", width="stretch", key="btn_idea_gen"):
         if ensure_api_key():
             idea_result = run_with_status(
                 lambda: planner.suggest_ideas(
@@ -97,7 +97,7 @@ def render_plot_tab(
             key="plot_phase3",
         )
 
-    if st.button("대형 플롯 생성", type="primary", use_container_width=True, key="btn_plot_gen"):
+    if st.button("대형 플롯 생성", type="primary", width="stretch", key="btn_plot_gen"):
         if not ensure_api_key():
             return
         if not plot_title.strip():
@@ -124,11 +124,11 @@ def render_plot_tab(
         st.text_area("플롯 결과", value=st.session_state["plot_result"], height=360, key="plot_result_view")
         save_col, load_col = st.columns(2)
         with save_col:
-            if st.button("플롯을 프로젝트 설정에 저장", use_container_width=True, key="btn_plot_save"):
+            if st.button("플롯을 프로젝트 설정에 저장", width="stretch", key="btn_plot_save"):
                 generator.ctx.save_plot_outline(st.session_state["plot_result"])
                 st.success("플롯을 저장했습니다. 회차 생성 탭에서 반영할 수 있습니다.")
         with load_col:
-            if st.button("저장된 플롯 불러오기", use_container_width=True, key="btn_plot_load"):
+            if st.button("저장된 플롯 불러오기", width="stretch", key="btn_plot_load"):
                 saved_plot = generator.ctx.get_plot_outline()
                 if saved_plot:
                     st.session_state["plot_result"] = saved_plot

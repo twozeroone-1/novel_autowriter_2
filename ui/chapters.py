@@ -69,16 +69,22 @@ def build_chapter_context_defaults(
         ),
     }
 
-def persist_chapter_canon_update(context: Any, canon_update: dict, episode_id: str | None = None) -> None:
+def sandbox_chapter_canon_update(context: Any, canon_update: dict, title: str | None = None, episode_id: str | None = None) -> None:
     if not canon_update or is_empty_canon_candidate(canon_update):
         return
-    state = context.canon_store.apply_state_update(canon_update)
-    if episode_id:
-        context.canon_store.write_snapshot(episode_id, state)
-    else:
-        from datetime import datetime
-        fallback_id = "manual_" + datetime.now().strftime("%Y%m%d%H%M%S")
-        context.canon_store.write_snapshot(fallback_id, state)
+        
+    from core.episode_artifact_store import EpisodeArtifactStore, _extract_episode_sequence
+    store = EpisodeArtifactStore(context.project_name)
+    
+    if not episode_id:
+        target_seq = _extract_episode_sequence(title or "")
+        if target_seq is not None:
+            episode_id = f"ep_{target_seq:03d}"
+        else:
+            from datetime import datetime
+            episode_id = "manual_" + datetime.now().strftime("%Y%m%d%H%M%S")
+            
+    store.save_canon_update(episode_id, canon_update)
 
 
 def persist_chapter_context_update(
@@ -496,51 +502,25 @@ def render_generation_tab(app: Any) -> None:
             st.warning(f"PREVIOUS SUMMARY 제안 생성에 실패했습니다: {generation_context_result['summary_error']}")
 
         current_snapshot = generator.ctx.get_workspace_settings()
-        generation_defaults = build_chapter_context_defaults(
-            suggested_state=generation_context_result.get("new_state", ""),
-            suggested_summary=generation_context_result.get("new_summary", ""),
-            current_snapshot=current_snapshot,
-        )
-
-        state_col, summary_col = st.columns(2)
-        with state_col:
-            generation_state = st.text_area(
-                "검토 후 반영할 CURRENT STATE",
-                value=generation_defaults["state"],
-                height=200,
-                key="generation_context_state",
-            )
-        with summary_col:
-            generation_summary = st.text_area(
-                "검토 후 반영할 PREVIOUS SUMMARY",
-                value=generation_defaults["summary_of_previous"],
-                height=200,
-                key="generation_context_summary",
-            )
             
         gen_canon_update = generation_context_result.get("canon_update")
         if generation_context_result.get("canon_update_error"):
             st.warning(f"CANON 분석 중 오류가 발생했습니다: {generation_context_result['canon_update_error']}")
         elif gen_canon_update and not is_empty_canon_candidate(gen_canon_update):
-            with st.expander("[결과] 구조화 CANON 분석 결과 (저장 시 자동 반영)", expanded=True):
-                st.caption("다음 회차 생성 시 등장인물 및 설정 유지에 사용됩니다.")
+            with st.expander("[결과] 구조화 CANON 분석 결과 (저장 시 초안으로 보관)", expanded=True):
+                st.caption("다음 회차 생성 시 보존할 인물/설정을 Draft 상태로 저장합니다. 플랫폼 발행 시 정식 반영됩니다.")
                 import json
                 st.code(json.dumps(gen_canon_update, ensure_ascii=False, indent=2), language="json")
 
-        if st.button("프로젝트 컨텍스트에 반영", key="apply_generation_context", width="stretch"):
-            persist_chapter_context_update(
-                generator.ctx,
-                state=generation_state,
-                summary_of_previous=generation_summary,
-            )
-            
+        if st.button("초안 상태로 임시 보관 (Draft State Save)", key="apply_generation_context", width="stretch"):
             if gen_canon_update and not is_empty_canon_candidate(gen_canon_update):
-                persist_chapter_canon_update(
+                sandbox_chapter_canon_update(
                     generator.ctx,
                     canon_update=gen_canon_update,
+                    title=st.session_state.get("current_title", ""),
                 )
             
-            st.success("STATE, PREVIOUS SUMMARY 그리고 CANON 업데이트를 반영했습니다.")
+            st.success("CANON 업데이트를 임시 보관했습니다.")
 
 
 def render_review_tab(app: Any) -> None:
@@ -731,51 +711,25 @@ def render_review_tab(app: Any) -> None:
                 st.warning(f"PREVIOUS SUMMARY 제안 생성에 실패했습니다: {review_context_result['summary_error']}")
 
             current_snapshot = generator.ctx.get_workspace_settings()
-            review_defaults = build_chapter_context_defaults(
-                suggested_state=review_context_result.get("new_state", ""),
-                suggested_summary=review_context_result.get("new_summary", ""),
-                current_snapshot=current_snapshot,
-            )
-
-            state_col, summary_col = st.columns(2)
-            with state_col:
-                review_state = st.text_area(
-                    "검토 후 반영할 CURRENT STATE",
-                    value=review_defaults["state"],
-                    height=200,
-                    key="review_context_state",
-                )
-            with summary_col:
-                review_summary = st.text_area(
-                    "검토 후 반영할 PREVIOUS SUMMARY",
-                    value=review_defaults["summary_of_previous"],
-                    height=200,
-                    key="review_context_summary",
-                )
 
             rev_canon_update = review_context_result.get("canon_update")
             if review_context_result.get("canon_update_error"):
                 st.warning(f"CANON 분석 중 오류가 발생했습니다: {review_context_result['canon_update_error']}")
             elif rev_canon_update and not is_empty_canon_candidate(rev_canon_update):
-                with st.expander("[결과] 구조화 CANON 분석 결과 (저장 시 자동 반영)", expanded=True):
-                    st.caption("다음 회차 생성 시 등장인물 및 설정 유지에 사용됩니다.")
+                with st.expander("[결과] 구조화 CANON 분석 결과 (저장 시 초안으로 보관)", expanded=True):
+                    st.caption("다음 회차 생성 시 보존할 인물/설정을 Draft 상태로 저장합니다. 플랫폼 발행 시 정식 반영됩니다.")
                     import json
                     st.code(json.dumps(rev_canon_update, ensure_ascii=False, indent=2), language="json")
 
-            if st.button("프로젝트 컨텍스트에 반영", key="apply_review_context", width="stretch"):
-                persist_chapter_context_update(
-                    generator.ctx,
-                    state=review_state,
-                    summary_of_previous=review_summary,
-                )
-                
+            if st.button("초안 상태로 임시 보관 (Draft State Save)", key="apply_review_context", width="stretch"):
                 if rev_canon_update and not is_empty_canon_candidate(rev_canon_update):
-                    persist_chapter_canon_update(
+                    sandbox_chapter_canon_update(
                         generator.ctx,
                         canon_update=rev_canon_update,
+                        title=review_title,
                     )
                 
-                st.success("STATE, PREVIOUS SUMMARY 그리고 CANON 업데이트를 반영했습니다.")
+                st.success("CANON 업데이트를 임시 보관했습니다.")
 
 
 def render_auto_mode_tab(app: Any) -> None:
@@ -873,48 +827,22 @@ def render_auto_mode_tab(app: Any) -> None:
                 st.info(f"리포트 저장 위치: `{result['review_report_path']}`")
 
         st.divider()
-        st.subheader("다음 회차용 상태 갱신")
-        st.markdown("방금 생성한 결과를 바탕으로 `STATE`와 `PREVIOUS SUMMARY`를 검토한 뒤 저장해 주세요.")
+        st.subheader("다음 회차용 CANON 임시 보관")
+        st.markdown("방금 완성된 원고에서 추출한 설정/인물 정보를 초안 상태로 보관합니다.")
 
         current_snapshot = generator.ctx.get_workspace_settings()
-        auto_defaults = build_chapter_context_defaults(
-            suggested_state=result.get("new_state", ""),
-            suggested_summary=result.get("new_summary", ""),
-            current_snapshot=current_snapshot,
-        )
-        state_col, summary_col = st.columns(2)
-        with state_col:
-            new_state = st.text_area(
-                "CURRENT STATE 업데이트",
-                value=auto_defaults["state"],
-                height=200,
-                help="현재 갈등과 다음 회차 목표를 최신 상태로 정리해 주세요.",
-            )
-        with summary_col:
-            new_summary = st.text_area(
-                "PREVIOUS SUMMARY",
-                value=auto_defaults["summary_of_previous"],
-                height=200,
-                help="자동 갱신 결과를 검토하고 필요하면 수정해 주세요.",
-            )
 
         canon_update = result.get("canon_update")
         if canon_update and not is_empty_canon_candidate(canon_update):
-            with st.expander("[결과] 구조화 CANON 분석 결과 (저장 시 자동 반영)", expanded=True):
-                st.caption("다음 회차 생성 시 등장인물 및 설정 유지에 사용됩니다.")
+            with st.expander("[결과] 구조화 CANON 분석 결과 (저장 시 초안으로 보관)", expanded=True):
+                st.caption("다음 회차 생성 시 보존할 인물/설정을 Draft 상태로 저장합니다. 플랫폼 발행 시 정식 반영됩니다.")
                 import json
                 st.code(json.dumps(canon_update, ensure_ascii=False, indent=2), language="json")
 
         st.divider()
-        if st.button("상태 저장 후 READY로 전환", type="primary", width="stretch"):
-            persist_chapter_context_update(
-                generator.ctx,
-                state=new_state,
-                summary_of_previous=new_summary,
-            )
-            
+        if st.button("임시 보관 후 READY로 전환", type="primary", width="stretch"):
             if canon_update and not is_empty_canon_candidate(canon_update):
-                persist_chapter_canon_update(
+                sandbox_chapter_canon_update(
                     generator.ctx,
                     canon_update=canon_update,
                     episode_id=result.get("episode_id"),
@@ -924,5 +852,5 @@ def render_auto_mode_tab(app: Any) -> None:
                 st.session_state.pop(key, None)
             st.session_state["auto_state"] = "READY"
 
-            st.success("상태를 저장했습니다. 다음 회차를 준비할 수 있습니다.")
+            st.success("상태를 보관했습니다. 다음 회차를 준비할 수 있습니다.")
             st.rerun()

@@ -1,0 +1,96 @@
+﻿python : ...F...............
+..................
+위치 줄:1 문자:1
++ python -m unittest tests/t
+est_context_manager.py > tes
+t_out.txt 2>&1
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~
+    + CategoryInfo          
+    : NotSpecified: (...F.  
+  .......................   
+ .........:String) [], R    
+emoteException
+    + FullyQualifiedErrorId 
+    : NativeCommandError
+ 
+============================
+============================
+==============
+FAIL: test_build_generation_
+prompt_reads_current_store_s
+napshots_and_plot_toggle (te
+sts.test_context_manager.Tes
+tContextManager.test_build_g
+eneration_prompt_reads_curre
+nt_store_snapshots_and_plot_
+toggle)
+----------------------------
+----------------------------
+--------------
+Traceback (most recent call 
+last):
+  File "C:\Users\W\novel_aut
+owriter_2\tests\test_context
+_manager.py", line 791, in t
+est_build_generation_prompt_
+reads_current_store_snapshot
+s_and_plot_toggle
+    self.assertIn("current s
+tate", prompt)
+    ~~~~~~~~~~~~~^^^^^^^^^^^
+^^^^^^^^^^^^^^
+AssertionError: 'current sta
+te' not found in '당신은 프로 웹소설
+ 작가입니다. 다음 설정과 등장인물 정보를 바탕으로
+ 다음 회차 본문을 작성해 주세요.\nCONTINU
+ITY를 엄격히 지켜 주세요.\n\n[STORY B
+IBLE] (세계관 및 기본 설정)\nworld d
+ata\n\n[STYLE GUIDE] (문체 및 작
+성 지침)\ntone guide\n\n[CONTIN
+UITY] (고정 설정, 절대 바뀌면 안 되는 규칙
+)\nfixed rules\n\n[CANON FAC
+TS] (발행 완료 회차 기준 확정 사실)\n{\n
+  "people": {\n    "Hero": {
+\n      "mood": "alert"\n   
+ }\n  },\n  "resources": {\n
+    "cash": 10\n  },\n  "hoo
+ks": [\n    "mystery"\n  ],\
+n  "timeline": [\n    "ep_00
+1"\n  ]\n}\n\n[RELEASE POLIC
+Y] (플랫폼별 발행 정책)\n{\n  "globa
+l": {\n    "max_daily_releas
+es": 2,\n    "burst_allowed"
+: true,\n    "cooldown_failu
+res": 2,\n    "stop_after_qu
+ality_incidents": 2,\n    "b
+lock_platform_after_platform
+_incidents": 2\n  },\n  "pla
+tforms": {\n    "munpia": {\
+n      "enabled": true,\n   
+   "default_times": [\n     
+   "07:00"\n      ],\n      
+"max_daily_releases": 1\n   
+ },\n    "novelpia": {\n    
+  "enabled": false,\n      "
+default_times": [\n        "
+21:00"\n      ],\n      "max
+_daily_releases": 1\n    }\n
+  }\n}\n\n[주요 등장인물 프로필]\n- H
+ero (Lead): Main character (
+특징: calm, smart)\n\n\n[PLOT 
+OUTLINE] (?κ린 ?뚮’ 媛\x80?대뱶)\
+nplot outline text\n\n[?뚮’ 諛
+섏쁺 媛뺣룄]\nstrict\n\n\n[이번 회차 
+작성 지시사항]\nwrite next chapter
+\n\n[분량 및 서술 조건]\n- 목표 분량: 공
+백 포함 약 4000자\n- 제목은 생략하고 본문만
+ 출력\n'
+
+----------------------------
+----------------------------
+--------------
+Ran 37 tests in 0.346s
+
+FAILED (failures=1)

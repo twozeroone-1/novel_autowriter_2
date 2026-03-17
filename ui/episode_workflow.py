@@ -563,7 +563,7 @@ def _build_shortcut_actions(
 def _render_shortcut_actions(shortcut_actions: tuple[dict, ...], *, navigate_to_tab=None, key_prefix: str) -> None:
     for index, action in enumerate(shortcut_actions):
         if callable(navigate_to_tab):
-            if st.button(action["label"], key=f"{key_prefix}_{index}", use_container_width=True):
+            if st.button(action["label"], key=f"{key_prefix}_{index}", width="stretch"):
                 navigate_to_tab(action["target_tab"], subsection=action.get("target_subsection"))
             st.caption(action["description"])
             continue

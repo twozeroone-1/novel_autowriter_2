@@ -233,7 +233,7 @@ def render_diagnostics_panel(project_name: str, *, key_prefix: str = "diag") -> 
         if automation_history:
             st.dataframe(
                 build_automation_history_rows(automation_history),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
         else:
